@@ -39,7 +39,7 @@ jobs:
       - name: Build and Push Container
         # Note: We build the container from the ./api folder where the Dockerfile lives
         run: |
-          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/uspto-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} ./api
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/uspto-repo/${{ env.SERVICE_NAME }}:${{ github.sha }} .
           docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/uspto-repo/${{ env.SERVICE_NAME }}:${{ github.sha }}
 
       - name: Deploy to Cloud Run
