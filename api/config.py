@@ -16,8 +16,16 @@ class Settings:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_file_wrapper"
 
     @property
-    def entity_table(self) -> str:
-        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.normalized_entities"
+    def assignments_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments"
+
+    @property
+    def maintenance_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.maintenance_fee_events"
+
+    @property
+    def unification_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.name_unification"
 
 
 settings = Settings()

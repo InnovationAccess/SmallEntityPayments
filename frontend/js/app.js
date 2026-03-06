@@ -42,6 +42,23 @@ export async function apiPost(path, body) {
 }
 
 /**
+ * DELETE JSON to the given API path and return the parsed response body.
+ */
+export async function apiDelete(path, body) {
+  const res = await fetch(path, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.detail ?? `HTTP ${res.status}`;
+    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+  return data;
+}
+
+/**
  * GET the given API path and return the parsed response body.
  */
 export async function apiGet(path) {
@@ -54,7 +71,7 @@ export async function apiGet(path) {
 export function setLoading(btn, loading) {
   if (loading) {
     btn.dataset.origText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner"></span>Loading…';
+    btn.innerHTML = '<span class="spinner"></span>Loading\u2026';
     btn.disabled = true;
   } else {
     btn.innerHTML = btn.dataset.origText ?? btn.innerHTML;
@@ -71,35 +88,32 @@ export function showStatus(el, message, type = 'success') {
 }
 
 /**
- * Render an array of PatentRecord objects as an HTML table.
- * Returns the HTML string.
+ * Render an array of objects as a dynamic HTML table.
+ * Infers columns from the keys of the first row.
  */
-export function buildPatentTable(records) {
-  if (!records || records.length === 0) {
+export function buildGenericTable(rows) {
+  if (!rows || rows.length === 0) {
     return '<p class="text-muted">No records found.</p>';
   }
-  const rows = records.map(r => {
-    const applicantHtml = (r.applicants || []).map(a => {
-      const typeClass = ({SMALL: 'badge-small', MICRO: 'badge-micro', LARGE: 'badge-large'})[a.entity_type] ?? '';
-      const geo = [a.city, a.state, a.country].filter(Boolean).join(', ');
-      return `<span class="applicant-badge ${typeClass}" title="${geo || ''}">${escHtml(a.name ?? '')}${a.entity_type ? ` (${a.entity_type})` : ''}</span>`;
-    }).join('');
-    return `<tr>
-      <td>${escHtml(r.patent_number)}</td>
-      <td>${escHtml(r.invention_title ?? '')}</td>
-      <td>${escHtml(r.grant_date ?? '')}</td>
-      <td>${applicantHtml || '<span class="text-muted">—</span>'}</td>
-    </tr>`;
+
+  const columns = Object.keys(rows[0]).filter(k => {
+    // Skip nested arrays/objects for column display
+    const sample = rows[0][k];
+    return !Array.isArray(sample) && typeof sample !== 'object';
+  });
+
+  const headerCells = columns.map(c =>
+    `<th>${escHtml(c.replace(/_/g, ' '))}</th>`
+  ).join('');
+
+  const bodyRows = rows.map(r => {
+    const cells = columns.map(c => `<td>${escHtml(String(r[c] ?? ''))}</td>`).join('');
+    return `<tr>${cells}</tr>`;
   }).join('');
 
   return `<table class="data-table">
-    <thead><tr>
-      <th>Patent #</th>
-      <th>Invention Title</th>
-      <th>Grant Date</th>
-      <th>Applicants</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
+    <thead><tr>${headerCells}</tr></thead>
+    <tbody>${bodyRows}</tbody>
   </table>`;
 }
 

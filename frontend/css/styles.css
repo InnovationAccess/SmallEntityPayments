@@ -332,6 +332,110 @@ textarea { resize: vertical; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ----- MDM Workspace ----- */
+.mdm-search-row {
+  display: flex;
+  gap: .75rem;
+  align-items: flex-end;
+}
+.mdm-search-row input { flex: 1; }
+
+.mdm-icon {
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  transition: background .15s;
+}
+.mdm-icon:hover { background: #e5e7eb; }
+.mdm-icon:disabled { opacity: .3; cursor: default; }
+
+/* MDM name color states */
+.name-active-rep   { color: #dc2626; font-weight: 700; }
+.name-is-rep       { color: #ea580c; font-weight: 600; }
+.name-normalized   { color: #16a34a; }
+
+/* Sortable column headers */
+.sortable { cursor: pointer; user-select: none; position: relative; }
+.sortable:hover { background: #edf2f7; }
+.sortable::after { content: ' \25B4\25BE'; font-size: .7em; color: var(--color-muted); margin-left: 4px; }
+.sortable.sort-asc::after  { content: ' \25B2'; color: var(--color-primary); }
+.sortable.sort-desc::after { content: ' \25BC'; color: var(--color-primary); }
+
+/* Selected row */
+.mdm-row-selected td { background: #eef2ff !important; }
+
+/* Workspace table tweaks */
+#mdm-table td, #mdm-table th { white-space: nowrap; }
+#mdm-table td:nth-child(3) { white-space: normal; min-width: 200px; } /* raw name */
+#mdm-table td:nth-child(7) { white-space: normal; min-width: 180px; } /* representative */
+
+/* Checkbox in table */
+.mdm-checkbox { width: 16px; height: 16px; cursor: pointer; }
+
+/* ----- Modal ----- */
+.modal {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-backdrop {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,.5);
+}
+.modal-content {
+  position: relative;
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  width: 90%;
+  max-width: 600px;
+  box-shadow: var(--shadow-md);
+}
+.modal-content--wide { max-width: 1100px; }
+.modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; }
+.modal-actions {
+  display: flex;
+  gap: .75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Address list in modal */
+.address-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.address-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .45rem .75rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: .875rem;
+}
+.address-item:last-child { border-bottom: none; }
+.address-item:hover { background: #f9fafb; }
+.address-checkbox { width: 16px; height: 16px; cursor: pointer; }
+
+/* Second-level modal (address search results) */
+.modal--level2 { z-index: 210; }
+
+/* Table selector for query builder */
+#qb-tables { min-height: 70px; }
+
 /* ----- Utility ----- */
 .hidden { display: none !important; }
 .mt-1   { margin-top: .5rem; }

@@ -18,20 +18,39 @@ Table: patent_file_wrapper
   - patent_number   STRING   (e.g. US10000001B2)
   - invention_title STRING
   - grant_date      DATE
-  - applicants      ARRAY<STRUCT<name STRING, city STRING, state STRING, country STRING, entity_type STRING>>
+  - applicants      ARRAY<STRUCT<name STRING, street_address STRING, city STRING, state STRING, country STRING, entity_type STRING>>
 
-Table: normalized_entities
-  - canonical_name  STRING
-  - aliases         ARRAY<STRING>
-  - city            STRING
-  - state           STRING
-  - country         STRING
-  - entity_type     STRING   (LARGE | SMALL | MICRO)
-  - created_at      TIMESTAMP
-  - updated_at      TIMESTAMP
+Table: patent_assignments
+  - patent_number   STRING
+  - recorded_date   DATE
+  - assignees       ARRAY<STRUCT<name STRING, street_address STRING, city STRING, state STRING, country STRING>>
+
+Table: maintenance_fee_events
+  - patent_number   STRING
+  - event_code      STRING
+  - event_date      DATE
+  - fee_code        STRING
+  - entity_status   STRING   (SMALL | MICRO | LARGE)
+
+Table: name_unification
+  - representative_name STRING  (the canonical entity name)
+  - associated_name     STRING  (a variant/typo name linked to the representative)
 
 Always generate standard SQL compatible with Google BigQuery.
 When referencing nested ARRAY fields use UNNEST or CROSS JOIN UNNEST syntax.
+
+IMPORTANT: When filtering by entity name (applicant or assignee), use the name_unification
+table to expand the search. Join or subquery against name_unification to find ALL variant
+names associated with the same representative_name, so that the query covers all known
+spellings of the entity. For example:
+  WHERE app.name IN (
+    SELECT associated_name FROM `uspto_data.name_unification`
+    WHERE representative_name = (
+      SELECT representative_name FROM `uspto_data.name_unification`
+      WHERE associated_name = 'Entity Name' LIMIT 1
+    )
+  )
+If the entity is not found in name_unification, fall back to matching the name directly.
 """
 
 _SYSTEM_PROMPT = (
@@ -50,7 +69,7 @@ class GeminiService:
     def _get_model(self) -> genai.GenerativeModel:
         if self._model is None:
             genai.configure(api_key=settings.GEMINI_API_KEY)
-            self._model = genai.GenerativeModel("gemini-1.5-flash")
+            self._model = genai.GenerativeModel("gemini-2.5-flash")
         return self._model
 
     def generate_sql_and_answer(self, user_prompt: str) -> Tuple[Optional[str], str]:

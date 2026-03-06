@@ -1,8 +1,8 @@
 /**
- * ai_assistant.js – Gemini AI Assistant panel logic.
+ * ai_assistant.js – Gemini AI Assistant panel logic (Tab 3).
  */
 
-import { apiPost, setLoading, buildPatentTable, escHtml } from './app.js';
+import { apiPost, setLoading, buildGenericTable, escHtml } from './app.js';
 
 const askBtn      = document.getElementById('ai-ask-btn');
 const promptInput = document.getElementById('ai-prompt');
@@ -28,7 +28,7 @@ askBtn.addEventListener('click', async () => {
   resultsDiv.classList.add('hidden');
 
   // Thinking placeholder
-  const thinkingEl = appendMessage('ai', '<span class="spinner"></span>Thinking…', true);
+  const thinkingEl = appendMessage('ai', '<span class="spinner"></span>Thinking\u2026', true);
 
   try {
     const res = await apiPost('/ai/ask', { prompt });
@@ -49,7 +49,7 @@ askBtn.addEventListener('click', async () => {
           <strong>Data Results</strong>
           <span class="results-count">${res.rows.length} record(s)</span>
         </div>
-        ${buildPatentTable(res.rows)}`;
+        ${buildGenericTable(res.rows)}`;
       resultsDiv.classList.remove('hidden');
     }
   } catch (err) {
@@ -63,7 +63,6 @@ askBtn.addEventListener('click', async () => {
 
 /**
  * Append a chat message bubble and return the message element.
- * If raw is true, innerHTML is used directly (for spinners etc.).
  */
 function appendMessage(role, content, raw = false) {
   const msg = document.createElement('div');
@@ -71,7 +70,7 @@ function appendMessage(role, content, raw = false) {
 
   const avatar = document.createElement('div');
   avatar.className = 'avatar';
-  avatar.textContent = role === 'user' ? '👤' : '🤖';
+  avatar.textContent = role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
 
   const bubble = document.createElement('div');
   bubble.className = 'chat-bubble';
@@ -93,11 +92,8 @@ function appendMessage(role, content, raw = false) {
  * wrapping inline code (backtick-delimited) in <code> tags.
  */
 function formatAnswer(text) {
-  // Escape HTML first
   let html = escHtml(text ?? '');
-  // Inline code
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  // Line breaks
   html = html.replace(/\n/g, '<br>');
   return html;
 }

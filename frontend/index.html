@@ -12,11 +12,11 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="logo">
-        <span class="logo-icon">⚖️</span>
+        <span class="logo-icon">&#9878;</span>
         <span class="logo-text">USPTO Data Platform</span>
       </div>
       <nav class="tab-nav" role="tablist">
-        <button class="tab-btn active" data-tab="mdm"           role="tab" aria-selected="true">MDM&nbsp;Entity&nbsp;Normalisation</button>
+        <button class="tab-btn active" data-tab="mdm"           role="tab" aria-selected="true">MDM&nbsp;Name&nbsp;Normalization</button>
         <button class="tab-btn"        data-tab="query-builder" role="tab" aria-selected="false">Boolean&nbsp;Query&nbsp;Builder</button>
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
       </nav>
@@ -25,93 +25,78 @@
 
   <main class="main-content">
 
-    <!-- ===== MDM Panel ===== -->
-    <section id="tab-mdm" class="tab-panel active" role="tabpanel" aria-labelledby="tab-btn-mdm">
-      <h2 class="panel-title">Master Data Management – Entity Normalisation</h2>
+    <!-- ===== Tab 1: MDM Name Normalization ===== -->
+    <section id="tab-mdm" class="tab-panel active" role="tabpanel">
+      <h2 class="panel-title">MDM – Entity Name Normalization</h2>
       <p class="panel-desc">
-        Search for applicant entities using exact name matching and geographic
-        cross-referencing, then merge variant names into a single canonical form.
+        Search entity names across patent and assignment data using boolean
+        expressions. Select a Representative Name (Copy), then associate
+        variant names with it (Paste). Use <code>+</code> (AND),
+        <code>-</code> (NOT), <code>*</code> (wildcard).
       </p>
 
-      <!-- Search card -->
+      <!-- Search bar -->
       <div class="card">
-        <h3 class="card-title">Search Entities</h3>
-        <div class="form-grid">
-          <div class="form-group">
-            <label for="mdm-name">Entity Name (exact)</label>
-            <input id="mdm-name" type="text" placeholder="e.g. Acme Corp" />
-          </div>
-          <div class="form-group">
-            <label for="mdm-city">City</label>
-            <input id="mdm-city" type="text" placeholder="e.g. San Jose" />
-          </div>
-          <div class="form-group">
-            <label for="mdm-state">State</label>
-            <input id="mdm-state" type="text" placeholder="e.g. CA" />
-          </div>
-          <div class="form-group">
-            <label for="mdm-country">Country (ISO)</label>
-            <input id="mdm-country" type="text" placeholder="e.g. US" />
-          </div>
+        <h3 class="card-title">Search Entity Names</h3>
+        <div class="mdm-search-row">
+          <input id="mdm-search-input" type="text"
+                 placeholder="e.g. GOOG*  or  MICRO*+CORP  or  APPLE+-INC" />
+          <button id="mdm-search-btn" class="btn btn-primary">Search</button>
         </div>
-        <button id="mdm-search-btn" class="btn btn-primary">Search</button>
       </div>
 
-      <!-- Results -->
-      <div id="mdm-results" class="results-area hidden"></div>
-
-      <!-- Merge / normalise card -->
-      <div class="card" id="mdm-merge-card">
-        <h3 class="card-title">Normalise Entity</h3>
-        <p class="card-desc">Define a canonical name and list variant / raw names that should map to it.</p>
-        <div class="form-grid">
-          <div class="form-group form-group--full">
-            <label for="merge-canonical">Canonical Name <span class="required">*</span></label>
-            <input id="merge-canonical" type="text" placeholder="The authoritative entity name" />
-          </div>
-          <div class="form-group form-group--full">
-            <label for="merge-aliases">Aliases (one per line)</label>
-            <textarea id="merge-aliases" rows="3" placeholder="ACME CORP&#10;Acme Corporation&#10;ACME CORPORATION INC"></textarea>
-          </div>
-          <div class="form-group">
-            <label for="merge-city">City</label>
-            <input id="merge-city" type="text" />
-          </div>
-          <div class="form-group">
-            <label for="merge-state">State</label>
-            <input id="merge-state" type="text" />
-          </div>
-          <div class="form-group">
-            <label for="merge-country">Country (ISO)</label>
-            <input id="merge-country" type="text" />
-          </div>
-          <div class="form-group">
-            <label for="merge-entity-type">Entity Type</label>
-            <select id="merge-entity-type">
-              <option value="">— select —</option>
-              <option value="SMALL">SMALL</option>
-              <option value="MICRO">MICRO</option>
-              <option value="LARGE">LARGE</option>
-            </select>
-          </div>
+      <!-- Workspace table -->
+      <div id="mdm-workspace" class="results-area hidden">
+        <div class="results-header">
+          <strong>Entity Workspace</strong>
+          <span id="mdm-results-count" class="results-count"></span>
+          <span id="mdm-active-rep" class="text-muted"></span>
         </div>
-        <button id="mdm-merge-btn" class="btn btn-success">Save Canonical Mapping</button>
-        <div id="mdm-merge-status" class="status-msg hidden"></div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="mdm-table">
+            <thead>
+              <tr>
+                <th style="width:30px"><!-- checkbox --></th>
+                <th style="width:30px"><!-- address --></th>
+                <th class="sortable" data-sort="raw_name">Raw Name</th>
+                <th style="width:30px" title="Copy as Representative"><!-- copy --></th>
+                <th style="width:30px" title="Paste (associate with Representative)"><!-- paste --></th>
+                <th class="sortable" data-sort="frequency" style="width:70px">Freq</th>
+                <th class="sortable" data-sort="representative_name">Representative</th>
+                <th style="width:30px" title="Copy Representative"><!-- copy rep --></th>
+                <th style="width:30px" title="Delete association"><!-- trash --></th>
+              </tr>
+            </thead>
+            <tbody id="mdm-table-body"></tbody>
+          </table>
+        </div>
       </div>
+
+      <!-- Status message -->
+      <div id="mdm-status" class="status-msg hidden"></div>
     </section>
 
-    <!-- ===== Boolean Query Builder Panel ===== -->
+    <!-- ===== Tab 2: Boolean Query Builder ===== -->
     <section id="tab-query-builder" class="tab-panel" role="tabpanel">
       <h2 class="panel-title">Boolean Query Builder</h2>
       <p class="panel-desc">
-        Construct a precise multi-condition query against the patent database.
-        Conditions are joined with the selected logic operator.
+        Construct multi-condition queries across patent data, assignments,
+        and maintenance fee records. Entity name searches automatically
+        expand via name normalization.
       </p>
 
       <div class="card">
         <div class="qb-controls">
+          <div class="form-group">
+            <label for="qb-tables">Query against tables:</label>
+            <select id="qb-tables" multiple>
+              <option value="patent_file_wrapper" selected>Patent File Wrapper</option>
+              <option value="patent_assignments">Patent Assignments</option>
+              <option value="maintenance_fee_events">Maintenance Fee Events</option>
+            </select>
+          </div>
           <div class="qb-logic">
-            <label>Join conditions with:</label>
+            <label>Join with:</label>
             <div class="toggle-group" role="group">
               <button id="logic-and" class="toggle-btn active" data-logic="AND">AND</button>
               <button id="logic-or"  class="toggle-btn"        data-logic="OR">OR</button>
@@ -131,37 +116,78 @@
         </div>
       </div>
 
-      <!-- Query results -->
       <div id="qb-results" class="results-area hidden"></div>
     </section>
 
-    <!-- ===== AI Assistant Panel ===== -->
+    <!-- ===== Tab 3: AI Assistant ===== -->
     <section id="tab-ai-assistant" class="tab-panel" role="tabpanel">
       <h2 class="panel-title">AI Assistant – Natural Language Query</h2>
       <p class="panel-desc">
-        Ask any question about the patent data in plain English.  Gemini will
+        Ask any question about the patent data in plain English. Gemini will
         translate it to SQL, run it, and explain the results.
       </p>
 
       <div class="card ai-card">
         <div class="ai-chat" id="ai-chat"></div>
         <div class="ai-input-row">
-          <textarea id="ai-prompt" rows="2" placeholder="e.g. How many small-entity patents were granted in California in 2023?"></textarea>
+          <textarea id="ai-prompt" rows="2"
+                    placeholder="e.g. List the 20 entities with the most 3rd maintenance fee payments at small entity rates in the past 10 years."></textarea>
           <button id="ai-ask-btn" class="btn btn-primary">Ask</button>
         </div>
       </div>
 
-      <!-- Generated SQL -->
       <div id="ai-sql-block" class="card hidden">
         <h3 class="card-title">Generated SQL</h3>
         <pre id="ai-sql-content" class="code-block"></pre>
       </div>
 
-      <!-- Data results -->
       <div id="ai-results" class="results-area hidden"></div>
     </section>
 
   </main>
+
+  <!-- ===== Address Modal ===== -->
+  <div id="address-modal" class="modal hidden">
+    <div class="modal-backdrop" data-close="address-modal"></div>
+    <div class="modal-content">
+      <h3 class="modal-title">Addresses for <span id="address-modal-name"></span></h3>
+      <div id="address-list" class="address-list"></div>
+      <div class="modal-actions">
+        <button id="addr-search-btn" class="btn btn-primary">Search Entities</button>
+        <button id="addr-unselect-btn" class="btn btn-secondary">Unselect All</button>
+        <button id="addr-close-btn" class="btn btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Address Search Results Modal ===== -->
+  <div id="address-results-modal" class="modal modal--level2 hidden">
+    <div class="modal-backdrop" data-close="address-results-modal"></div>
+    <div class="modal-content modal-content--wide">
+      <h3 class="modal-title">Entities at Selected Addresses</h3>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="addr-results-table">
+          <thead>
+            <tr>
+              <th style="width:30px"></th>
+              <th style="width:30px"></th>
+              <th>Raw Name</th>
+              <th style="width:30px"></th>
+              <th style="width:30px"></th>
+              <th style="width:70px">Freq</th>
+              <th>Representative</th>
+              <th style="width:30px"></th>
+              <th style="width:30px"></th>
+            </tr>
+          </thead>
+          <tbody id="addr-results-body"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button id="addr-results-close-btn" class="btn btn-secondary">Close</button>
+      </div>
+    </div>
+  </div>
 
   <footer class="site-footer">
     <p>USPTO Data Platform &copy; 2024</p>

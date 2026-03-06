@@ -1,56 +1,136 @@
-"""MDM router – UI-driven entity name normalisation endpoints."""
+"""MDM Name Normalization router – endpoints for the workspace in Tab 1."""
 
 from __future__ import annotations
 
-from typing import List
+import re
+from typing import List, Tuple
 
 from fastapi import APIRouter, HTTPException, status
 
-from api.models.schemas import EntityMergeRequest, EntitySearchRequest, NormalizedEntity
+from api.models.schemas import (
+    Address,
+    MDMAddressRequest,
+    MDMAddressSearchRequest,
+    MDMAssociateRequest,
+    MDMDeleteRequest,
+    MDMSearchRequest,
+    MDMSearchResult,
+)
 from api.services.bigquery_service import bq_service
 
 router = APIRouter(prefix="/mdm", tags=["MDM"])
 
 
-@router.post("/search", response_model=List[NormalizedEntity], summary="Search normalized entities")
-def search_entities(request: EntitySearchRequest) -> List[NormalizedEntity]:
-    """
-    Search the MDM canonical entity table using exact name matching and/or
-    geographic cross-referencing (city / state / country).
+# ------------------------------------------------------------------
+# Boolean query parser
+# ------------------------------------------------------------------
 
-    At least one filter must be provided.
+def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
+    """Parse a boolean search expression into AND terms and NOT terms.
+
+    Syntax:
+      +  = AND (terms separated by +)
+      -  = NOT (prefix a term with -)
+      *  = wildcard (translated to % for SQL LIKE)
+
+    Examples:
+      "GOOG*"           → and_terms=["%GOOG%"], not_terms=[]
+      "MICRO*+CORP"     → and_terms=["%MICRO%", "%CORP%"], not_terms=[]
+      "APPLE+-INC"      → and_terms=["%APPLE%"], not_terms=["%INC%"]
     """
-    if not any([request.name, request.city, request.state, request.country]):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="At least one of name, city, state, or country must be provided.",
-        )
-    rows = bq_service.search_entities(
-        name=request.name,
-        city=request.city,
-        state=request.state,
-        country=request.country,
+    and_terms: List[str] = []
+    not_terms: List[str] = []
+
+    # Split on + to get individual terms.
+    parts = re.split(r"\+", query.strip())
+
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+
+        is_not = part.startswith("-")
+        if is_not:
+            part = part[1:].strip()
+
+        if not part:
+            continue
+
+        # Replace * with % for SQL LIKE.
+        term = part.replace("*", "%")
+
+        # If the term doesn't already contain %, wrap it with % for
+        # a CONTAINS-style match.
+        if "%" not in term:
+            term = f"%{term}%"
+
+        if is_not:
+            not_terms.append(term)
+        else:
+            and_terms.append(term)
+
+    return and_terms, not_terms
+
+
+# ------------------------------------------------------------------
+# Endpoints
+# ------------------------------------------------------------------
+
+@router.post("/search", response_model=List[MDMSearchResult])
+def search_entity_names(req: MDMSearchRequest) -> List[MDMSearchResult]:
+    """Boolean search for entity names across both patent tables."""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="Search query cannot be empty.")
+
+    and_terms, not_terms = _parse_boolean_query(req.query)
+    if not and_terms and not not_terms:
+        raise HTTPException(status_code=400, detail="No valid search terms found.")
+
+    rows = bq_service.search_entity_names(and_terms, not_terms)
+    return [MDMSearchResult(**row) for row in rows]
+
+
+@router.post("/associate")
+def associate_names(req: MDMAssociateRequest) -> dict:
+    """Create associations between names and a representative."""
+    if not req.representative_name.strip():
+        raise HTTPException(status_code=400, detail="Representative name is required.")
+    if not req.associated_names:
+        raise HTTPException(status_code=400, detail="At least one name to associate is required.")
+
+    count = bq_service.associate_names(
+        req.representative_name.strip(),
+        [n.strip() for n in req.associated_names if n.strip()],
     )
-    return [NormalizedEntity(**row) for row in rows]
+    return {"status": "ok", "representative_name": req.representative_name, "count": count}
 
 
-@router.post(
-    "/merge",
-    status_code=status.HTTP_200_OK,
-    summary="Create or update a canonical entity mapping",
-)
-def merge_entity(request: EntityMergeRequest) -> dict:
-    """
-    Insert or update a canonical entity record.  Aliases (raw / variant names)
-    are stored alongside geographic attributes so downstream queries can map
-    any raw applicant name to the canonical form.
-    """
-    bq_service.upsert_entity(
-        canonical_name=request.canonical_name,
-        aliases=request.aliases,
-        city=request.city,
-        state=request.state,
-        country=request.country,
-        entity_type=request.entity_type,
-    )
-    return {"status": "ok", "canonical_name": request.canonical_name}
+@router.delete("/associate")
+def delete_association(req: MDMDeleteRequest) -> dict:
+    """Remove an association. If the name is a representative, un-associate all."""
+    if not req.associated_name.strip():
+        raise HTTPException(status_code=400, detail="Associated name is required.")
+
+    result = bq_service.delete_association(req.associated_name.strip())
+    return {"status": "ok", **result}
+
+
+@router.post("/addresses", response_model=List[Address])
+def get_addresses(req: MDMAddressRequest) -> List[Address]:
+    """Return unique addresses for an entity name."""
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Entity name is required.")
+
+    rows = bq_service.get_addresses(req.name.strip())
+    return [Address(**row) for row in rows]
+
+
+@router.post("/search-by-address", response_model=List[MDMSearchResult])
+def search_by_address(req: MDMAddressSearchRequest) -> List[MDMSearchResult]:
+    """Find entity names matching the given addresses."""
+    if not req.addresses:
+        raise HTTPException(status_code=400, detail="At least one address is required.")
+
+    addr_dicts = [a.model_dump() for a in req.addresses]
+    rows = bq_service.search_by_address(addr_dicts)
+    return [MDMSearchResult(**row) for row in rows]

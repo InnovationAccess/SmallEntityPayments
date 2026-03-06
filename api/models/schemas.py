@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -12,14 +12,23 @@ from pydantic import BaseModel, Field
 
 class Applicant(BaseModel):
     name: Optional[str] = None
+    street_address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
     entity_type: Optional[str] = None
 
 
+class Assignee(BaseModel):
+    name: Optional[str] = None
+    street_address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
-# Patent file wrapper
+# Patent records
 # ---------------------------------------------------------------------------
 
 class PatentRecord(BaseModel):
@@ -29,33 +38,54 @@ class PatentRecord(BaseModel):
     applicants: List[Applicant] = []
 
 
+class AssignmentRecord(BaseModel):
+    patent_number: str
+    recorded_date: Optional[str] = None
+    assignees: List[Assignee] = []
+
+
+class MaintenanceFeeRecord(BaseModel):
+    patent_number: str
+    event_code: Optional[str] = None
+    event_date: Optional[str] = None
+    fee_code: Optional[str] = None
+    entity_status: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
-# MDM – Normalized entities
+# MDM – Name Normalization
 # ---------------------------------------------------------------------------
 
-class NormalizedEntity(BaseModel):
-    canonical_name: str
-    aliases: List[str] = []
+class MDMSearchRequest(BaseModel):
+    query: str = Field(..., description="Boolean search expression: + (AND), - (NOT), * (wildcard)")
+
+
+class MDMSearchResult(BaseModel):
+    raw_name: str
+    frequency: int
+    representative_name: Optional[str] = None
+
+
+class MDMAssociateRequest(BaseModel):
+    representative_name: str = Field(..., description="The name to serve as representative")
+    associated_names: List[str] = Field(..., description="Names to associate with the representative")
+
+
+class MDMDeleteRequest(BaseModel):
+    associated_name: str = Field(..., description="The name to un-associate")
+
+
+class Address(BaseModel):
+    street_address: Optional[str] = None
     city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
-    entity_type: Optional[str] = None
 
 
-class EntitySearchRequest(BaseModel):
-    name: Optional[str] = Field(None, description="Exact entity name to search for")
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
+class MDMAddressRequest(BaseModel):
+    name: str = Field(..., description="Entity name to look up addresses for")
 
 
-class EntityMergeRequest(BaseModel):
-    canonical_name: str = Field(..., description="The authoritative name to keep")
-    aliases: List[str] = Field(..., description="Raw / variant names to map to the canonical name")
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
-    entity_type: Optional[str] = None
+class MDMAddressSearchRequest(BaseModel):
+    addresses: List[Address] = Field(..., description="Addresses to search entities by")
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +93,7 @@ class EntityMergeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class QueryCondition(BaseModel):
-    field: str = Field(..., description="Column name (e.g. invention_title, applicants.name)")
+    field: str = Field(..., description="Column name (e.g. invention_title, applicant_name)")
     operator: str = Field(..., description="Comparison operator: CONTAINS, EQUALS, STARTS_WITH, ENDS_WITH")
     value: str
 
@@ -72,11 +102,15 @@ class BooleanQuery(BaseModel):
     conditions: List[QueryCondition] = Field(..., min_length=1)
     logic: str = Field("AND", description="Top-level logic joining conditions: AND | OR")
     limit: int = Field(100, ge=1, le=1000)
+    tables: List[str] = Field(
+        default=["patent_file_wrapper"],
+        description="Tables to query against",
+    )
 
 
 class QueryResult(BaseModel):
     total_rows: int
-    rows: List[PatentRecord]
+    rows: List[Dict[str, Any]]
 
 
 # ---------------------------------------------------------------------------
@@ -90,4 +124,4 @@ class AIQueryRequest(BaseModel):
 class AIQueryResponse(BaseModel):
     generated_sql: Optional[str] = None
     answer: str
-    rows: List[PatentRecord] = []
+    rows: List[Dict[str, Any]] = []
