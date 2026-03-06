@@ -102,7 +102,7 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
     if "patent_file_wrapper" in tables:
         from_parts.append(f"`{settings.patent_table}` AS p")
         if needs_patent_unnest:
-            from_parts.append("UNNEST(p.applicants) AS app")
+            from_parts.append(", UNNEST(p.applicants) AS app")
         select_parts.extend([
             "p.patent_number", "p.invention_title",
             "CAST(p.grant_date AS STRING) AS grant_date",
@@ -117,7 +117,7 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
         if join_on:
             from_parts.append(join_on)
         if needs_assignment_unnest:
-            from_parts.append("UNNEST(a.assignees) AS asgn")
+            from_parts.append(", UNNEST(a.assignees) AS asgn")
         if "patent_file_wrapper" not in tables:
             select_parts.append("a.patent_number")
         select_parts.append("CAST(a.recorded_date AS STRING) AS recorded_date")

@@ -330,16 +330,16 @@ class BigQueryService:
         under that representative. Otherwise returns just the name.
         """
         sql = f"""
-        WITH rep AS (
-          SELECT representative_name AS rep
+        WITH rep_names AS (
+          SELECT representative_name AS rep_name
           FROM `{settings.unification_table}`
           WHERE associated_name = @name
           UNION DISTINCT
-          SELECT @name AS rep
+          SELECT @name AS rep_name
         )
         SELECT DISTINCT associated_name
         FROM `{settings.unification_table}`
-        WHERE representative_name IN (SELECT rep FROM rep)
+        WHERE representative_name IN (SELECT rep_name FROM rep_names)
         """
         params = [
             bigquery.ScalarQueryParameter("name", "STRING", name),
