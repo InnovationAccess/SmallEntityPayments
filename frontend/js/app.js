@@ -97,9 +97,9 @@ export function buildGenericTable(rows) {
   }
 
   const columns = Object.keys(rows[0]).filter(k => {
-    // Skip nested arrays/objects for column display
+    // Skip nested arrays/objects for column display (but allow null)
     const sample = rows[0][k];
-    return !Array.isArray(sample) && typeof sample !== 'object';
+    return sample === null || (!Array.isArray(sample) && typeof sample !== 'object');
   });
 
   const headerCells = columns.map(c =>
