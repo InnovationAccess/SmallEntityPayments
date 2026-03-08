@@ -41,17 +41,17 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
     and_terms: List[str] = []
     not_terms: List[str] = []
 
-    # Split on + to get individual terms.
-    parts = re.split(r"\+", query.strip())
+    # Normalize: treat + as a separator (like space), then split on whitespace.
+    # This handles both "+term1+term2" and "+term1 +term2 -term3" syntax.
+    parts = query.replace("+", " ").split()
 
     for part in parts:
-        part = part.strip()
         if not part:
             continue
 
         is_not = part.startswith("-")
         if is_not:
-            part = part[1:].strip()
+            part = part[1:]
 
         if not part:
             continue
@@ -59,10 +59,11 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
         # Replace * with % for SQL LIKE.
         term = part.replace("*", "%")
 
-        # If the term doesn't already contain %, wrap it with % for
-        # a CONTAINS-style match.
-        if "%" not in term:
-            term = f"%{term}%"
+        # Always wrap with % for CONTAINS-style match.
+        if not term.startswith("%"):
+            term = f"%{term}"
+        if not term.endswith("%"):
+            term = f"{term}%"
 
         if is_not:
             not_terms.append(term)

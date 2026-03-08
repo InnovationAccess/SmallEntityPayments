@@ -32,20 +32,23 @@ class Assignee(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PatentRecord(BaseModel):
-    patent_number: str
+    patent_number: Optional[str] = None
+    application_number: Optional[str] = None
     invention_title: Optional[str] = None
     grant_date: Optional[str] = None
     applicants: List[Applicant] = []
 
 
 class AssignmentRecord(BaseModel):
-    patent_number: str
+    patent_number: Optional[str] = None
+    application_number: Optional[str] = None
     recorded_date: Optional[str] = None
     assignees: List[Assignee] = []
 
 
 class MaintenanceFeeRecord(BaseModel):
-    patent_number: str
+    patent_number: Optional[str] = None
+    application_number: Optional[str] = None
     event_code: Optional[str] = None
     event_date: Optional[str] = None
     fee_code: Optional[str] = None
@@ -101,7 +104,7 @@ class QueryCondition(BaseModel):
 class BooleanQuery(BaseModel):
     conditions: List[QueryCondition] = Field(..., min_length=1)
     logic: str = Field("AND", description="Top-level logic joining conditions: AND | OR")
-    limit: int = Field(100, ge=1, le=1000)
+    limit: int = Field(100, ge=1)
     tables: List[str] = Field(
         default=["patent_file_wrapper"],
         description="Tables to query against",
@@ -117,8 +120,17 @@ class QueryResult(BaseModel):
 # AI / Gemini assistant
 # ---------------------------------------------------------------------------
 
+class AIChatMessage(BaseModel):
+    role: str = Field(..., description="'user' or 'ai'")
+    content: str
+
+
 class AIQueryRequest(BaseModel):
     prompt: str = Field(..., description="Natural-language question about the patent data")
+    history: List[AIChatMessage] = Field(
+        default=[],
+        description="Previous conversation messages for context",
+    )
 
 
 class AIQueryResponse(BaseModel):

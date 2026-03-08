@@ -27,5 +27,9 @@ class Settings:
     def unification_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.name_unification"
 
+    @property
+    def entity_names_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.entity_names"
+
 
 settings = Settings()

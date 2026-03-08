@@ -1,4 +1,4 @@
-"""Gemini AI Assistant router – natural-language querying of patent data."""
+"""Gemini AI Assistant router – conversational querying of patent data."""
 
 from __future__ import annotations
 
@@ -31,26 +31,51 @@ def _row_to_dict(row: dict) -> Dict[str, Any]:
 
 @router.post("/ask", response_model=AIQueryResponse)
 def ask(request: AIQueryRequest) -> AIQueryResponse:
-    """Translate a natural-language question into BigQuery SQL via Gemini,
-    execute it, and return the answer with data rows."""
+    """Handle a conversational message — discuss, refine, or execute queries."""
     if not request.prompt.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Prompt must not be empty.",
         )
 
-    sql, answer = gemini_service.generate_sql_and_answer(request.prompt)
+    history = [{"role": m.role, "content": m.content} for m in request.history]
+
+    try:
+        sql, answer = gemini_service.chat(request.prompt, history)
+    except Exception as exc:  # noqa: BLE001
+        return AIQueryResponse(
+            generated_sql=None,
+            answer=f"Could not generate response: {exc}",
+            rows=[],
+        )
 
     rows: list[Dict[str, Any]] = []
+    max_retries = 2
     if sql:
-        try:
-            raw_rows = bq_service.run_query(sql)
-            rows = [_row_to_dict(r) for r in raw_rows]
-        except Exception as exc:  # noqa: BLE001
-            error_type = type(exc).__name__
-            answer = (
-                f"{answer}\n\n[Query could not be executed ({error_type}). "
-                "Please refine your question or check that the data exists.]"
-            )
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                raw_rows = bq_service.run_query(sql)
+                rows = [_row_to_dict(r) for r in raw_rows]
+                last_error = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+                if attempt < max_retries:
+                    try:
+                        fixed_sql, fixed_answer = gemini_service.fix_sql(
+                            history, sql, last_error
+                        )
+                        if fixed_sql:
+                            sql = fixed_sql
+                            answer = fixed_answer
+                        else:
+                            break
+                    except Exception:  # noqa: BLE001
+                        break
+                else:
+                    break
+        if last_error:
+            answer += f"\n\n[Query failed after {max_retries + 1} attempts: {last_error}]"
 
     return AIQueryResponse(generated_sql=sql, answer=answer, rows=rows)
