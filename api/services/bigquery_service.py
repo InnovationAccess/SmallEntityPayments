@@ -41,7 +41,7 @@ class BigQueryService:
         and_terms: List[str],
         not_terms: List[str],
     ) -> List[Dict[str, Any]]:
-        """Search entity names across both tables with boolean logic.
+        """Search pre-computed entity_names table with boolean logic.
 
         Returns unique names with frequency counts and representative
         associations from name_unification.
@@ -51,42 +51,28 @@ class BigQueryService:
 
         for i, term in enumerate(and_terms):
             pname = f"and_{i}"
-            like_clauses.append(f"UPPER(entity_name) LIKE UPPER(@{pname})")
+            like_clauses.append(f"UPPER(en.entity_name) LIKE UPPER(@{pname})")
             params.append(bigquery.ScalarQueryParameter(pname, "STRING", term))
 
         not_clauses: List[str] = []
         for i, term in enumerate(not_terms):
             pname = f"not_{i}"
-            not_clauses.append(f"UPPER(entity_name) NOT LIKE UPPER(@{pname})")
+            not_clauses.append(f"UPPER(en.entity_name) NOT LIKE UPPER(@{pname})")
             params.append(bigquery.ScalarQueryParameter(pname, "STRING", term))
 
         where_parts = like_clauses + not_clauses
         where_sql = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
         sql = f"""
-        WITH all_names AS (
-          SELECT app.name AS entity_name
-          FROM `{settings.patent_table}`, UNNEST(applicants) AS app
-          WHERE app.name IS NOT NULL
-          UNION ALL
-          SELECT asgn.name AS entity_name
-          FROM `{settings.assignments_table}`, UNNEST(assignees) AS asgn
-          WHERE asgn.name IS NOT NULL
-        ),
-        counted AS (
-          SELECT entity_name, COUNT(*) AS frequency
-          FROM all_names
-          {where_sql}
-          GROUP BY entity_name
-        )
         SELECT
-          c.entity_name AS raw_name,
-          c.frequency,
+          en.entity_name AS raw_name,
+          en.frequency,
           nu.representative_name
-        FROM counted c
+        FROM `{settings.entity_names_table}` en
         LEFT JOIN `{settings.unification_table}` nu
-          ON nu.associated_name = c.entity_name
-        ORDER BY c.frequency DESC
+          ON nu.associated_name = en.entity_name
+        {where_sql}
+        ORDER BY en.frequency DESC
         LIMIT 1000
         """
         return self.run_query(sql, params)
@@ -100,46 +86,47 @@ class BigQueryService:
         representative_name: str,
         associated_names: List[str],
     ) -> int:
-        """Associate names with a representative. Handles cascading.
+        """Associate names with a representative using batched DML.
 
-        If any of the associated_names is itself a representative (has names
-        under it), those names cascade to the new representative. Returns the
-        number of associations created/updated.
+        Three operations regardless of batch size:
+        1. Cascade UPDATE: re-point names under any associated_name
+        2. Bulk MERGE: upsert all associations
+        3. Self MERGE: ensure representative has self-association
         """
-        count = 0
-        for name in associated_names:
-            # Step 1: Cascade — if this name was a representative, re-point
-            # all names under it to the new representative.
-            cascade_sql = f"""
-            UPDATE `{settings.unification_table}`
-            SET representative_name = @new_rep
-            WHERE representative_name = @old_rep
-            """
-            cascade_params = [
-                bigquery.ScalarQueryParameter("new_rep", "STRING", representative_name),
-                bigquery.ScalarQueryParameter("old_rep", "STRING", name),
-            ]
-            self.run_query(cascade_sql, cascade_params)
+        # Build parameterized name list.
+        name_params = [
+            bigquery.ScalarQueryParameter(f"name_{i}", "STRING", name)
+            for i, name in enumerate(associated_names)
+        ]
+        name_list = ", ".join(f"@name_{i}" for i in range(len(associated_names)))
+        rep_param = bigquery.ScalarQueryParameter("rep", "STRING", representative_name)
 
-            # Step 2: Upsert the association itself.
-            merge_sql = f"""
-            MERGE `{settings.unification_table}` AS T
-            USING (SELECT @rep AS representative_name, @name AS associated_name) AS S
-            ON T.associated_name = S.associated_name
-            WHEN MATCHED THEN
-              UPDATE SET representative_name = S.representative_name
-            WHEN NOT MATCHED THEN
-              INSERT (representative_name, associated_name)
-              VALUES (S.representative_name, S.associated_name)
-            """
-            merge_params = [
-                bigquery.ScalarQueryParameter("rep", "STRING", representative_name),
-                bigquery.ScalarQueryParameter("name", "STRING", name),
-            ]
-            self.run_query(merge_sql, merge_params)
-            count += 1
+        # DML 1: Cascade — re-point any names under the associated names.
+        cascade_sql = f"""
+        UPDATE `{settings.unification_table}`
+        SET representative_name = @rep
+        WHERE representative_name IN ({name_list})
+        """
+        self.run_query(cascade_sql, [rep_param] + name_params)
 
-        # Ensure the representative itself has a self-association row.
+        # DML 2: Bulk MERGE — upsert all associations at once.
+        union_parts = [
+            f"SELECT @rep AS representative_name, @name_{i} AS associated_name"
+            for i in range(len(associated_names))
+        ]
+        merge_sql = f"""
+        MERGE `{settings.unification_table}` AS T
+        USING ({' UNION ALL '.join(union_parts)}) AS S
+        ON T.associated_name = S.associated_name
+        WHEN MATCHED THEN
+          UPDATE SET representative_name = S.representative_name
+        WHEN NOT MATCHED THEN
+          INSERT (representative_name, associated_name)
+          VALUES (S.representative_name, S.associated_name)
+        """
+        self.run_query(merge_sql, [rep_param] + name_params)
+
+        # DML 3: Self-association for the representative.
         self_sql = f"""
         MERGE `{settings.unification_table}` AS T
         USING (SELECT @rep AS representative_name, @rep AS associated_name) AS S
@@ -150,12 +137,9 @@ class BigQueryService:
           INSERT (representative_name, associated_name)
           VALUES (S.representative_name, S.associated_name)
         """
-        self_params = [
-            bigquery.ScalarQueryParameter("rep", "STRING", representative_name),
-        ]
-        self.run_query(self_sql, self_params)
+        self.run_query(self_sql, [rep_param])
 
-        return count
+        return len(associated_names)
 
     def delete_association(self, associated_name: str) -> Dict[str, Any]:
         """Remove an association. If the name is a representative, un-associate
@@ -260,29 +244,25 @@ class BigQueryService:
         addr_where = " OR ".join(addr_conditions)
 
         sql = f"""
-        WITH all_names AS (
-          SELECT app.name AS entity_name
+        WITH addr_names AS (
+          SELECT DISTINCT app.name AS entity_name
           FROM `{settings.patent_table}`, UNNEST(applicants) AS app
-          WHERE ({addr_where})
-          UNION ALL
-          SELECT asgn.name AS entity_name
+          WHERE ({addr_where}) AND app.name IS NOT NULL
+          UNION DISTINCT
+          SELECT DISTINCT asgn.name AS entity_name
           FROM `{settings.assignments_table}`, UNNEST(assignees) AS asgn
-          WHERE ({addr_where})
-        ),
-        counted AS (
-          SELECT entity_name, COUNT(*) AS frequency
-          FROM all_names
-          WHERE entity_name IS NOT NULL
-          GROUP BY entity_name
+          WHERE ({addr_where}) AND asgn.name IS NOT NULL
         )
         SELECT
-          c.entity_name AS raw_name,
-          c.frequency,
+          an.entity_name AS raw_name,
+          COALESCE(en.frequency, 0) AS frequency,
           nu.representative_name
-        FROM counted c
+        FROM addr_names an
+        LEFT JOIN `{settings.entity_names_table}` en
+          ON en.entity_name = an.entity_name
         LEFT JOIN `{settings.unification_table}` nu
-          ON nu.associated_name = c.entity_name
-        ORDER BY c.frequency DESC
+          ON nu.associated_name = an.entity_name
+        ORDER BY frequency DESC
         LIMIT 500
         """
         return self.run_query(sql, params)
@@ -303,7 +283,7 @@ class BigQueryService:
         WITH rep AS (
           SELECT representative_name
           FROM `{settings.unification_table}`
-          WHERE associated_name = @name
+          WHERE LOWER(associated_name) = LOWER(@name)
           LIMIT 1
         )
         SELECT DISTINCT associated_name
@@ -333,13 +313,14 @@ class BigQueryService:
         WITH rep_names AS (
           SELECT representative_name AS rep_name
           FROM `{settings.unification_table}`
-          WHERE associated_name = @name
+          WHERE LOWER(associated_name) = LOWER(@name)
           UNION DISTINCT
           SELECT @name AS rep_name
         )
         SELECT DISTINCT associated_name
         FROM `{settings.unification_table}`
         WHERE representative_name IN (SELECT rep_name FROM rep_names)
+           OR LOWER(representative_name) IN (SELECT LOWER(rep_name) FROM rep_names)
         """
         params = [
             bigquery.ScalarQueryParameter("name", "STRING", name),
