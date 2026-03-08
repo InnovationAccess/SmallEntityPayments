@@ -11,9 +11,10 @@ DROP TABLE IF EXISTS `uspto_data.name_unification`;
 
 -- Core patent file wrapper table (bibliographic data)
 CREATE TABLE `uspto_data.patent_file_wrapper` (
-  patent_number   STRING    NOT NULL OPTIONS(description = 'USPTO patent number (e.g. US10000001B2)'),
-  invention_title STRING             OPTIONS(description = 'Title of the patented invention'),
-  grant_date      DATE               OPTIONS(description = 'Date the patent was granted'),
+  patent_number      STRING           OPTIONS(description = 'USPTO patent number – NULL for pending applications'),
+  application_number STRING           OPTIONS(description = 'USPTO application number (series + serial)'),
+  invention_title    STRING           OPTIONS(description = 'Title of the patented invention'),
+  grant_date         DATE             OPTIONS(description = 'Date the patent was granted'),
   applicants      ARRAY<STRUCT<
     name            STRING           OPTIONS(description = 'Applicant entity name as filed'),
     street_address  STRING           OPTIONS(description = 'Street address of the applicant'),
@@ -31,8 +32,9 @@ OPTIONS (
 
 -- Patent assignment/transfer records
 CREATE TABLE `uspto_data.patent_assignments` (
-  patent_number   STRING    NOT NULL OPTIONS(description = 'USPTO patent number'),
-  recorded_date   DATE               OPTIONS(description = 'Date the assignment was recorded'),
+  patent_number      STRING           OPTIONS(description = 'USPTO patent number – NULL for ungranted applications'),
+  application_number STRING           OPTIONS(description = 'USPTO application number'),
+  recorded_date      DATE             OPTIONS(description = 'Date the assignment was recorded'),
   assignees       ARRAY<STRUCT<
     name            STRING           OPTIONS(description = 'Assignee entity name'),
     street_address  STRING           OPTIONS(description = 'Street address of the assignee'),
@@ -47,8 +49,9 @@ OPTIONS (
 
 -- Maintenance fee payment history
 CREATE TABLE `uspto_data.maintenance_fee_events` (
-  patent_number   STRING    NOT NULL OPTIONS(description = 'USPTO patent number'),
-  event_code      STRING             OPTIONS(description = 'Fee event code'),
+  patent_number      STRING           OPTIONS(description = 'USPTO patent number'),
+  application_number STRING           OPTIONS(description = 'USPTO application number'),
+  event_code         STRING           OPTIONS(description = 'Fee event code'),
   event_date      DATE               OPTIONS(description = 'Date of the fee event'),
   fee_code        STRING             OPTIONS(description = 'Fee type code'),
   entity_status   STRING             OPTIONS(description = 'Entity size status: SMALL, MICRO, or LARGE')
@@ -64,4 +67,16 @@ CREATE TABLE `uspto_data.name_unification` (
 )
 OPTIONS (
   description = 'Manual name normalization associations linking variant entity names to representative names'
+);
+
+-- Pre-computed unique entity names with frequency counts (for MDM search optimization)
+DROP TABLE IF EXISTS `uspto_data.entity_names`;
+
+CREATE TABLE `uspto_data.entity_names` (
+  entity_name STRING NOT NULL OPTIONS(description = 'Unique entity name from applicants or assignees'),
+  frequency   INT64  NOT NULL OPTIONS(description = 'Number of occurrences across all patent tables')
+)
+CLUSTER BY entity_name
+OPTIONS (
+  description = 'Pre-computed unique entity names with frequency counts for fast MDM search'
 );
