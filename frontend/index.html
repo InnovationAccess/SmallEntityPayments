@@ -104,7 +104,7 @@
           </div>
           <div class="qb-limit">
             <label for="qb-limit">Max results:</label>
-            <input id="qb-limit" type="number" value="50" min="1" max="1000" />
+            <input id="qb-limit" type="number" value="50" min="1" />
           </div>
         </div>
 
@@ -123,22 +123,25 @@
     <section id="tab-ai-assistant" class="tab-panel" role="tabpanel">
       <h2 class="panel-title">AI Assistant – Natural Language Query</h2>
       <p class="panel-desc">
-        Ask any question about the patent data in plain English. Gemini will
-        translate it to SQL, run it, and explain the results.
+        Chat with the AI about your patent data. Describe what you need, refine
+        the query through conversation, then ask it to run when ready.
       </p>
 
       <div class="card ai-card">
         <div class="ai-chat" id="ai-chat"></div>
         <div class="ai-input-row">
           <textarea id="ai-prompt" rows="2"
-                    placeholder="e.g. List the 20 entities with the most 3rd maintenance fee payments at small entity rates in the past 10 years."></textarea>
-          <button id="ai-ask-btn" class="btn btn-primary">Ask</button>
+                    placeholder="Describe the data you're looking for..."></textarea>
+          <button id="ai-ask-btn" class="btn btn-primary">Send</button>
         </div>
       </div>
 
       <div id="ai-sql-block" class="card hidden">
-        <h3 class="card-title">Generated SQL</h3>
-        <pre id="ai-sql-content" class="code-block"></pre>
+        <div class="accordion-header" id="ai-sql-toggle">
+          <button class="accordion-btn" aria-expanded="false">+</button>
+          <span class="accordion-title">Generated SQL</span>
+        </div>
+        <pre id="ai-sql-content" class="code-block accordion-body hidden"></pre>
       </div>
 
       <div id="ai-results" class="results-area hidden"></div>
@@ -193,9 +196,9 @@
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
 
-  <script src="/static/js/app.js"           type="module"></script>
-  <script src="/static/js/mdm.js"           type="module"></script>
-  <script src="/static/js/query_builder.js" type="module"></script>
-  <script src="/static/js/ai_assistant.js"  type="module"></script>
+  <script src="/static/js/app.js?v=7"           type="module"></script>
+  <script src="/static/js/mdm.js?v=7"           type="module"></script>
+  <script src="/static/js/query_builder.js?v=7" type="module"></script>
+  <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>
 </body>
 </html>

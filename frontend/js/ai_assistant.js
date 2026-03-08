@@ -1,15 +1,28 @@
 /**
- * ai_assistant.js – Gemini AI Assistant panel logic (Tab 3).
+ * ai_assistant.js – Conversational AI Assistant panel logic (Tab 3).
  */
 
-import { apiPost, setLoading, buildGenericTable, escHtml } from './app.js';
+import { apiPost, setLoading, buildInteractiveTable, escHtml } from './app.js';
 
 const askBtn      = document.getElementById('ai-ask-btn');
 const promptInput = document.getElementById('ai-prompt');
 const chatDiv     = document.getElementById('ai-chat');
 const sqlBlock    = document.getElementById('ai-sql-block');
 const sqlContent  = document.getElementById('ai-sql-content');
+const sqlToggle   = document.getElementById('ai-sql-toggle');
 const resultsDiv  = document.getElementById('ai-results');
+
+// Conversation history sent to the backend for context.
+let chatHistory = [];
+
+// SQL accordion toggle
+sqlToggle.addEventListener('click', () => {
+  const btn = sqlToggle.querySelector('.accordion-btn');
+  const expanded = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', String(!expanded));
+  btn.textContent = expanded ? '+' : '\u2212';
+  sqlContent.classList.toggle('hidden', expanded);
+});
 
 // Allow Ctrl/Cmd+Enter to submit
 promptInput.addEventListener('keydown', e => {
@@ -21,40 +34,51 @@ askBtn.addEventListener('click', async () => {
   if (!prompt) return;
 
   appendMessage('user', prompt);
+  // Send history WITHOUT the current message (backend receives it as `prompt`)
+  const historyToSend = [...chatHistory];
+  chatHistory.push({ role: 'user', content: prompt });
   promptInput.value = '';
 
   setLoading(askBtn, true);
-  sqlBlock.classList.add('hidden');
   resultsDiv.classList.add('hidden');
 
   // Thinking placeholder
   const thinkingEl = appendMessage('ai', '<span class="spinner"></span>Thinking\u2026', true);
 
   try {
-    const res = await apiPost('/ai/ask', { prompt });
+    const res = await apiPost('/ai/ask', { prompt, history: historyToSend });
 
     // Replace thinking placeholder with actual answer
     thinkingEl.querySelector('.chat-bubble').innerHTML = formatAnswer(res.answer);
 
-    // Show generated SQL if present
+    // Save AI response to history
+    chatHistory.push({ role: 'ai', content: res.answer });
+
+    // Show generated SQL in accordion if present
     if (res.generated_sql) {
       sqlContent.textContent = res.generated_sql;
       sqlBlock.classList.remove('hidden');
+      // Keep accordion collapsed
+      const btn = sqlToggle.querySelector('.accordion-btn');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.textContent = '+';
+      sqlContent.classList.add('hidden');
     }
 
     // Show data rows if any
     if (res.rows && res.rows.length > 0) {
-      resultsDiv.innerHTML = `
-        <div class="results-header">
-          <strong>Data Results</strong>
-          <span class="results-count">${res.rows.length} record(s)</span>
-        </div>
-        ${buildGenericTable(res.rows)}`;
+      resultsDiv.innerHTML = '';
+      const hdr = document.createElement('div');
+      hdr.className = 'results-header';
+      hdr.innerHTML = `<strong>Data Results</strong><span class="results-count">${res.rows.length} record(s)</span>`;
+      resultsDiv.appendChild(hdr);
+      buildInteractiveTable(resultsDiv, res.rows);
       resultsDiv.classList.remove('hidden');
     }
   } catch (err) {
     thinkingEl.querySelector('.chat-bubble').innerHTML =
       `<span style="color:var(--color-danger)">${escHtml(err.message)}</span>`;
+    chatHistory.push({ role: 'ai', content: err.message });
   } finally {
     setLoading(askBtn, false);
     chatDiv.scrollTop = chatDiv.scrollHeight;

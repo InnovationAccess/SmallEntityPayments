@@ -125,3 +125,150 @@ export function escHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+/**
+ * Render an interactive table into *container* with sortable columns and
+ * a column-visibility dropdown.  Appends elements to the container (does
+ * NOT clear it — caller should set innerHTML='' first if needed).
+ */
+export function buildInteractiveTable(container, rows) {
+  if (!rows || rows.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'text-muted';
+    p.textContent = 'No records found.';
+    container.appendChild(p);
+    return;
+  }
+
+  const columns = Object.keys(rows[0]).filter(k => {
+    const sample = rows[0][k];
+    return sample === null || (!Array.isArray(sample) && typeof sample !== 'object');
+  });
+
+  const visibleCols = new Set(columns);
+  let sortCol = null;
+  let sortDir = 0; // 0=none, 1=asc, -1=desc
+
+  // ---- Toolbar with column picker ----
+  const toolbar = document.createElement('div');
+  toolbar.className = 'table-toolbar';
+
+  const pickerWrap = document.createElement('div');
+  pickerWrap.className = 'col-picker-wrap';
+
+  const pickerBtn = document.createElement('button');
+  pickerBtn.className = 'btn btn-secondary col-picker-btn';
+  pickerBtn.textContent = 'Columns \u25BE';
+
+  const pickerMenu = document.createElement('div');
+  pickerMenu.className = 'col-picker-menu hidden';
+
+  columns.forEach(col => {
+    const lbl = document.createElement('label');
+    lbl.className = 'col-picker-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = true;
+    cb.addEventListener('change', () => {
+      if (cb.checked) visibleCols.add(col); else visibleCols.delete(col);
+      toggleCol(col, cb.checked);
+    });
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' ' + col.replace(/_/g, ' ')));
+    pickerMenu.appendChild(lbl);
+  });
+
+  pickerBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    document.querySelectorAll('.col-picker-menu').forEach(m => m.classList.add('hidden'));
+    pickerMenu.classList.toggle('hidden');
+  });
+  pickerMenu.addEventListener('click', e => e.stopPropagation());
+
+  pickerWrap.appendChild(pickerBtn);
+  pickerWrap.appendChild(pickerMenu);
+  toolbar.appendChild(pickerWrap);
+
+  // ---- Table ----
+  const tableWrap = document.createElement('div');
+  tableWrap.style.overflowX = 'auto';
+
+  const table = document.createElement('table');
+  table.className = 'data-table';
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  columns.forEach(col => {
+    const th = document.createElement('th');
+    th.className = 'sortable';
+    th.dataset.col = col;
+    th.textContent = col.replace(/_/g, ' ');
+    th.addEventListener('click', () => doSort(col));
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  table.appendChild(tbody);
+
+  let currentRows = [...rows];
+
+  function renderBody() {
+    const html = currentRows.map(r => {
+      return '<tr>' + columns.map(c => {
+        const hide = visibleCols.has(c) ? '' : ' style="display:none"';
+        return `<td data-col="${c}"${hide}>${escHtml(String(r[c] ?? ''))}</td>`;
+      }).join('') + '</tr>';
+    }).join('');
+    tbody.innerHTML = html;
+  }
+
+  function doSort(col) {
+    if (sortCol === col) {
+      sortDir = sortDir === 1 ? -1 : sortDir === -1 ? 0 : 1;
+    } else {
+      sortCol = col;
+      sortDir = 1;
+    }
+    headerRow.querySelectorAll('th').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      if (th.dataset.col === sortCol && sortDir !== 0) {
+        th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+      }
+    });
+    if (sortDir === 0) {
+      currentRows = [...rows];
+      sortCol = null;
+    } else {
+      currentRows = [...rows].sort((a, b) => {
+        const va = a[col] ?? '';
+        const vb = b[col] ?? '';
+        if (typeof va === 'number' && typeof vb === 'number') return sortDir * (va - vb);
+        return sortDir * String(va).localeCompare(String(vb), undefined, { numeric: true });
+      });
+    }
+    renderBody();
+  }
+
+  function toggleCol(col, show) {
+    const th = headerRow.querySelector(`th[data-col="${col}"]`);
+    if (th) th.style.display = show ? '' : 'none';
+    tbody.querySelectorAll(`td[data-col="${col}"]`).forEach(td => {
+      td.style.display = show ? '' : 'none';
+    });
+  }
+
+  renderBody();
+  tableWrap.appendChild(table);
+  container.appendChild(toolbar);
+  container.appendChild(tableWrap);
+
+  // Close column picker on outside click (one-time global handler).
+  if (!window._colPickerGlobalHandler) {
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.col-picker-menu').forEach(m => m.classList.add('hidden'));
+    });
+    window._colPickerGlobalHandler = true;
+  }
+}

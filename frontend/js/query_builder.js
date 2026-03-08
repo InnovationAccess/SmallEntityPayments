@@ -2,7 +2,7 @@
  * query_builder.js – Boolean Query Builder panel logic (Tab 2).
  */
 
-import { apiPost, apiGet, setLoading, buildGenericTable, escHtml } from './app.js';
+import { apiPost, apiGet, setLoading, buildInteractiveTable, escHtml } from './app.js';
 
 const conditionsContainer = document.getElementById('qb-conditions');
 const addBtn              = document.getElementById('qb-add-btn');
@@ -12,32 +12,58 @@ const logicBtns           = document.querySelectorAll('.toggle-btn');
 const tablesSelect        = document.getElementById('qb-tables');
 
 let fieldsByTable      = {};
-let availableOperators = ['CONTAINS', 'EQUALS', 'STARTS_WITH', 'ENDS_WITH'];
 let activeLogic        = 'AND';
+
+const _DATE_FIELDS = new Set(['grant_date', 'recorded_date', 'event_date']);
+const _CODE_FIELDS = new Set(['event_code', 'fee_code']);
+const _NAME_FIELDS_SET = new Set(['applicant_name', 'assignee_name']);
+
+const _TEXT_OPS = ['CONTAINS', 'EQUALS', 'STARTS_WITH', 'ENDS_WITH'];
+const _DATE_OPS = ['AFTER', 'BEFORE', 'EQUALS'];
+const _CODE_OPS = ['EQUALS'];
+
+// Populated at init from API; keys are field names, values are arrays of codes.
+let _CODE_FIELD_DATA = {};
+
+function getOperatorsForField(field) {
+  if (_DATE_FIELDS.has(field)) return _DATE_OPS;
+  if (_CODE_FIELDS.has(field)) return _CODE_OPS;
+  return _TEXT_OPS;
+}
 
 // ---- Bootstrap -----------------------------------------------------------
 
 (async function init() {
   try {
     const meta = await apiGet('/query/fields');
-    fieldsByTable      = meta.fields ?? {};
-    availableOperators = meta.operators ?? availableOperators;
+    fieldsByTable = meta.fields ?? {};
   } catch (_) {
     fieldsByTable = {
       patent_file_wrapper: [
-        'patent_number', 'invention_title', 'grant_date',
+        'patent_number', 'application_number', 'invention_title', 'grant_date',
         'applicant_name', 'applicant_city', 'applicant_state',
         'applicant_country', 'applicant_entity_type',
       ],
       patent_assignments: [
-        'patent_number', 'recorded_date',
+        'patent_number', 'application_number', 'recorded_date',
         'assignee_name', 'assignee_city', 'assignee_state', 'assignee_country',
       ],
       maintenance_fee_events: [
-        'patent_number', 'event_code', 'event_date', 'fee_code', 'entity_status',
+        'patent_number', 'application_number', 'event_code', 'event_date', 'fee_code', 'entity_status',
       ],
     };
   }
+
+  // Fetch code dropdown lists in parallel (non-critical).
+  await Promise.all([
+    apiGet('/query/event-codes')
+      .then(r => { _CODE_FIELD_DATA.event_code = r.codes || []; })
+      .catch(() => {}),
+    apiGet('/query/fee-codes')
+      .then(r => { _CODE_FIELD_DATA.fee_code = r.codes || []; })
+      .catch(() => {}),
+  ]);
+
   addConditionRow();
 })();
 
@@ -79,9 +105,37 @@ tablesSelect.addEventListener('change', () => {
   });
 });
 
+// ---- Helpers --------------------------------------------------------------
+
+function _updateOperators(opSel, field) {
+  const ops = getOperatorsForField(field);
+  const prev = opSel.value;
+  opSel.innerHTML = '';
+  ops.forEach(op => {
+    const opt = document.createElement('option');
+    opt.value = op;
+    opt.textContent = op.replace(/_/g, ' ');
+    if (op === prev) opt.selected = true;
+    opSel.appendChild(opt);
+  });
+}
+
+function _fillCodeSelect(sel, field) {
+  sel.innerHTML = '';
+  sel.setAttribute('multiple', '');
+  const codes = _CODE_FIELD_DATA[field] || [];
+  sel.size = Math.min(6, codes.length || 1);
+  for (const code of codes) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = code;
+    sel.appendChild(opt);
+  }
+}
+
 // ---- Add condition row ---------------------------------------------------
 
-function addConditionRow(defaultField = '', defaultOp = 'CONTAINS', defaultVal = '') {
+function addConditionRow(defaultField = '', defaultOp = '', defaultVal = '') {
   const fields = getAvailableFields();
   const row = document.createElement('div');
   row.className = 'qb-row';
@@ -100,7 +154,11 @@ function addConditionRow(defaultField = '', defaultOp = 'CONTAINS', defaultVal =
   const opSel = document.createElement('select');
   opSel.className = 'qb-operator';
   opSel.setAttribute('aria-label', 'Operator');
-  availableOperators.forEach(op => {
+
+  // Set operators based on selected field.
+  const activeField = defaultField || fieldSel.value;
+  const ops = getOperatorsForField(activeField);
+  ops.forEach(op => {
     const opt = document.createElement('option');
     opt.value = op;
     opt.textContent = op.replace(/_/g, ' ');
@@ -108,12 +166,10 @@ function addConditionRow(defaultField = '', defaultOp = 'CONTAINS', defaultVal =
     opSel.appendChild(opt);
   });
 
+  // Create default value input element.
   const valueInput = document.createElement('input');
-  valueInput.type = 'text';
-  valueInput.placeholder = 'Value\u2026';
   valueInput.className = 'qb-value';
   valueInput.setAttribute('aria-label', 'Value');
-  valueInput.value = defaultVal;
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'btn btn-danger';
@@ -125,10 +181,56 @@ function addConditionRow(defaultField = '', defaultOp = 'CONTAINS', defaultVal =
     }
   });
 
+  // Assemble row (elements must be in DOM tree for querySelector).
   row.appendChild(fieldSel);
   row.appendChild(opSel);
   row.appendChild(valueInput);
   row.appendChild(removeBtn);
+
+  // Sync the value element type based on the selected field.
+  // May swap <input> ↔ <select> for code fields.
+  function syncInputType() {
+    const field = fieldSel.value;
+    const curEl = row.querySelector('.qb-value');
+
+    if (_CODE_FIELDS.has(field) && _CODE_FIELD_DATA[field]?.length > 0) {
+      // Code field → dropdown select
+      if (curEl.tagName !== 'SELECT') {
+        const sel = document.createElement('select');
+        sel.className = 'qb-value';
+        sel.setAttribute('aria-label', 'Value');
+        curEl.replaceWith(sel);
+        _fillCodeSelect(sel, field);
+      } else {
+        _fillCodeSelect(curEl, field);
+      }
+    } else {
+      // Text or date field → input element
+      let inp = curEl;
+      if (curEl.tagName !== 'INPUT') {
+        inp = document.createElement('input');
+        inp.className = 'qb-value';
+        inp.setAttribute('aria-label', 'Value');
+        curEl.replaceWith(inp);
+      }
+      if (_DATE_FIELDS.has(field)) {
+        inp.type = 'date';
+        inp.placeholder = '';
+      } else {
+        inp.type = 'text';
+        inp.placeholder = _NAME_FIELDS_SET.has(field)
+          ? 'e.g. +elect* +tele*'
+          : 'Value\u2026';
+      }
+    }
+  }
+
+  syncInputType();
+  fieldSel.addEventListener('change', syncInputType);
+  fieldSel.addEventListener('change', () => _updateOperators(opSel, fieldSel.value));
+
+  if (defaultVal) row.querySelector('.qb-value').value = defaultVal;
+
   conditionsContainer.appendChild(row);
 }
 
@@ -143,7 +245,13 @@ executeBtn.addEventListener('click', async () => {
   for (const row of rows) {
     const field    = row.querySelector('.qb-field').value;
     const operator = row.querySelector('.qb-operator').value;
-    const value    = row.querySelector('.qb-value').value.trim();
+    const valEl    = row.querySelector('.qb-value');
+    let value;
+    if (valEl.tagName === 'SELECT' && valEl.multiple) {
+      value = Array.from(valEl.selectedOptions).map(o => o.value).filter(v => v).join(',');
+    } else {
+      value = valEl.value.trim();
+    }
     if (!value) continue;
     conditions.push({ field, operator, value });
   }
@@ -162,12 +270,12 @@ executeBtn.addEventListener('click', async () => {
 
   try {
     const result = await apiPost('/query/execute', { conditions, logic: activeLogic, limit, tables });
-    resultsDiv.innerHTML = `
-      <div class="results-header">
-        <strong>Query Results</strong>
-        <span class="results-count">${result.total_rows} record(s) returned</span>
-      </div>
-      ${buildGenericTable(result.rows)}`;
+    resultsDiv.innerHTML = '';
+    const hdr = document.createElement('div');
+    hdr.className = 'results-header';
+    hdr.innerHTML = `<strong>Query Results</strong><span class="results-count">${result.total_rows} record(s) returned</span>`;
+    resultsDiv.appendChild(hdr);
+    buildInteractiveTable(resultsDiv, result.rows);
     resultsDiv.classList.remove('hidden');
   } catch (err) {
     resultsDiv.innerHTML = `<p class="status-msg error">${escHtml(err.message)}</p>`;
