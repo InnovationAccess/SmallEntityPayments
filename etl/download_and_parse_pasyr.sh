@@ -4,7 +4,7 @@
 
 set -e
 
-API_KEY="${USPTO_API_KEY:-inbsszqfwwnkjfebpibunnbllbygqz}"
+API_KEY="${USPTO_API_KEY:?Set USPTO_API_KEY environment variable}"
 MIN_YEAR=2006
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PARSER="$SCRIPT_DIR/parse_assignments_xml.py"

@@ -106,18 +106,20 @@ def parse_record(record: dict) -> dict:
 def process_year_file(zf: zipfile.ZipFile, filename: str, fout, min_year: int):
     """Process a single year JSON file from the ZIP, streaming with ijson."""
     # Extract year from filename (e.g. "2025.json" -> 2025)
+    # Special files like "no_filing_date.json" are always processed
+    stem = Path(filename).stem
     try:
-        year = int(Path(filename).stem)
+        year = int(stem)
     except ValueError:
-        print(f"  Skipping {filename}: cannot determine year", file=sys.stderr)
-        return 0
+        year = None
 
-    if year < min_year:
+    if year is not None and year < min_year:
         print(f"  Skipping {filename}: year {year} < min_year {min_year}",
               file=sys.stderr)
         return 0
 
-    print(f"  Processing {filename} (year {year})...", file=sys.stderr)
+    label = f"year {year}" if year else stem
+    print(f"  Processing {filename} ({label})...", file=sys.stderr)
     count = 0
 
     with zf.open(filename) as f:
