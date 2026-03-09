@@ -267,11 +267,11 @@ The manual method was used during development. CI/CD is configured but requires 
 
 | Table | Row Count | Size | Status |
 |---|---|---|---|
-| `patent_file_wrapper` | 0 | 0 | EMPTY — awaiting PTFWPRE load |
-| `patent_assignments` | 17,022,259 | 2 GB | Loaded from PASYR (2006+) |
+| `patent_file_wrapper` | 12,733,017 | ~1.5 GB | Loaded from PTFWPRE (2001-2026 + no_filing_date) |
+| `patent_assignments` | 17,022,261 | 2 GB | Loaded from PASYR (2006+) |
 | `maintenance_fee_events` | 12,215,388 | 528 MB | Loaded from PTMNFEE2 (2016+) |
 | `name_unification` | 64 | 0 | MDM mappings (user-created) |
-| `entity_names` | 799,611 | 27 MB | Pre-computed from assignments only (needs refresh after PFW load) |
+| `entity_names` | 1,342,085 | ~50 MB | Pre-computed from applicants + assignees |
 
 ---
 
@@ -334,24 +334,18 @@ The full memory file contents are in the repository (see MEMORY.md section above
 
 ## KNOWN ISSUES
 
-1. **patent_file_wrapper is empty** — Top priority to fix via PTFWPRE
-2. **PTFWPRE download incomplete** — Only 2021-2026 file is in GCS
-3. **PTFWPRE parser doesn't exist yet** — Must be built from scratch
-4. **entity_names only contains assignee names** — Needs refresh after PFW load to include applicants
-5. **load_file_wrapper.py exists but must NOT be used** — Sources from third-party data
-6. **USPTO API key is hardcoded in download_and_parse_pasyr.sh** — Should use $USPTO_API_KEY env var
-7. **Uncommitted changes** — All recent changes (Vertex AI, chat, sortable tables) are deployed but not in git
+All critical issues from the original handoff have been resolved:
+- ~~patent_file_wrapper is empty~~ — **RESOLVED**: 12,733,017 rows loaded from PTFWPRE
+- ~~PTFWPRE download incomplete~~ — **RESOLVED**: All 3 ZIPs downloaded and archived in GCS
+- ~~PTFWPRE parser doesn't exist~~ — **RESOLVED**: etl/parse_file_wrapper.py built and tested
+- ~~entity_names only contains assignee names~~ — **RESOLVED**: 1,342,085 names (applicants + assignees)
+- ~~load_file_wrapper.py must not be used~~ — **RESOLVED**: Deleted from repo
+- ~~USPTO API key hardcoded~~ — **RESOLVED**: Now requires $USPTO_API_KEY env var
+- ~~Uncommitted changes~~ — **RESOLVED**: All changes committed and pushed
+- ~~CI/CD secrets not configured~~ — **RESOLVED**: All 5 GitHub Actions secrets set
 
----
+## REMAINING OPPORTUNITIES
 
-## SEQUENCE OF NEXT STEPS
-
-1. On the new machine: clone the repo, set up gcloud auth, set environment variables
-2. Commit and push all uncommitted changes from the Chromebook (or pull the latest deployed code)
-3. Complete PTFWPRE download (remaining 2 files)
-4. Inspect PTFWPRE JSON structure from a sample
-5. Build the PTFWPRE parser (streaming, memory-safe)
-6. Load PTFWPRE data into BigQuery patent_file_wrapper table
-7. Run populate_entity_names.py to rebuild entity_names with applicant data
-8. Verify all 3 tabs work correctly with the new data
-9. Deploy the updated application
+1. **CI/CD end-to-end test** — GitHub Actions workflow has secrets configured but hasn't been triggered yet. Next push to main will test it.
+2. **Weekly PTFWPRE refresh** — The PTFWPRE bulk data updates weekly. Could automate periodic re-parsing.
+3. **Entity type analytics** — With 12.7M patent file wrapper records, rich entity status analysis is now possible.
