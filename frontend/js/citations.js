@@ -5,7 +5,7 @@
  * /api/forward-citations/{patent_number}/summary
  */
 
-import { apiGet, setLoading, showStatus, escHtml, enableTableSorting, stampOriginalOrder } from './app.js';
+import { apiGet, setLoading, showStatus, escHtml, enableTableSorting, stampOriginalOrder, enableAssignmentPopup } from './app.js';
 
 const searchInput   = document.getElementById('cite-search-input');
 const searchBtn     = document.getElementById('cite-search-btn');
@@ -109,6 +109,7 @@ async function doSearch() {
         <td>${escHtml(c.citing_examiner_name || '')}</td>
       </tr>`).join('');
       stampOriginalOrder(citeTable);
+      enableAssignmentPopup('#cite-table-body td:nth-child(1)');
     }
 
     resultsArea.classList.remove('hidden');

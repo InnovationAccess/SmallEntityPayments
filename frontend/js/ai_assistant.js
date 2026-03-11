@@ -2,7 +2,7 @@
  * ai_assistant.js – Conversational AI Assistant panel logic (Tab 3).
  */
 
-import { apiPost, setLoading, buildInteractiveTable, escHtml } from './app.js';
+import { apiPost, setLoading, buildInteractiveTable, escHtml, enableAssignmentPopup } from './app.js';
 
 const askBtn      = document.getElementById('ai-ask-btn');
 const promptInput = document.getElementById('ai-prompt');
@@ -73,6 +73,7 @@ askBtn.addEventListener('click', async () => {
       hdr.innerHTML = `<strong>Data Results</strong><span class="results-count">${res.rows.length} record(s)</span>`;
       resultsDiv.appendChild(hdr);
       buildInteractiveTable(resultsDiv, res.rows);
+      enableAssignmentPopup('#ai-results td[data-col="patent_number"]');
       resultsDiv.classList.remove('hidden');
     }
   } catch (err) {

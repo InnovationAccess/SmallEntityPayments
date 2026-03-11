@@ -349,3 +349,101 @@ export function buildInteractiveTable(container, rows) {
     window._colPickerGlobalHandler = true;
   }
 }
+
+// ---- Assignment chain popup -----------------------------------------------
+
+const _chainCache = {};   // patent_number -> { assignments: [...] }
+let _chainPopup = null;   // the single popup element
+let _chainHideTimer = null;
+let _chainShowTimer = null;
+
+function getOrCreatePopup() {
+  if (_chainPopup) return _chainPopup;
+  const el = document.createElement('div');
+  el.id = 'assignment-chain-popup';
+  el.className = 'chain-popup hidden';
+  el.addEventListener('mouseenter', () => clearTimeout(_chainHideTimer));
+  el.addEventListener('mouseleave', () => hideChainPopup());
+  document.body.appendChild(el);
+  _chainPopup = el;
+  return el;
+}
+
+function hideChainPopup() {
+  clearTimeout(_chainShowTimer);
+  _chainHideTimer = setTimeout(() => {
+    const popup = getOrCreatePopup();
+    popup.classList.add('hidden');
+  }, 200);
+}
+
+async function showChainPopup(patentNum, anchorEl) {
+  clearTimeout(_chainHideTimer);
+  clearTimeout(_chainShowTimer);
+
+  // Short delay to avoid flashing on accidental hover
+  _chainShowTimer = setTimeout(async () => {
+    const popup = getOrCreatePopup();
+
+    // Position near the anchor
+    const rect = anchorEl.getBoundingClientRect();
+    popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
+    popup.style.left = `${rect.left + window.scrollX}px`;
+    popup.innerHTML = '<div class="chain-loading">Loading assignments\u2026</div>';
+    popup.classList.remove('hidden');
+
+    // Fetch (cached)
+    if (!_chainCache[patentNum]) {
+      try {
+        const data = await apiGet(`/api/assignments/${encodeURIComponent(patentNum)}/chain`);
+        _chainCache[patentNum] = data;
+      } catch (err) {
+        popup.innerHTML = `<div class="chain-loading">Error: ${escHtml(err.message)}</div>`;
+        return;
+      }
+    }
+
+    const chain = _chainCache[patentNum].assignments || [];
+    if (chain.length === 0) {
+      popup.innerHTML = '<div class="chain-loading">No assignment records found.</div>';
+      return;
+    }
+
+    const rows = chain.map(a =>
+      `<tr>
+        <td class="chain-td-date">${escHtml(a.execution_date || '—')}</td>
+        <td>${escHtml(a.assignor)}</td>
+        <td>${escHtml(a.conveyance)}</td>
+        <td>${escHtml(a.assignee)}</td>
+      </tr>`
+    ).join('');
+
+    popup.innerHTML = `
+      <div class="chain-header">Assignment Chain — Patent ${escHtml(patentNum)}</div>
+      <div class="chain-table-wrap">
+        <table class="chain-table">
+          <thead><tr>
+            <th>Date</th><th>Assignor</th><th>Type</th><th>Assignee</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }, 300);
+}
+
+/**
+ * Make patent number cells in a table trigger the assignment chain popup.
+ *
+ * Call after populating the table body.  Pass a CSS selector that identifies
+ * the patent-number cells (e.g. '#cite-table-body td:nth-child(1)').
+ */
+export function enableAssignmentPopup(selector) {
+  document.querySelectorAll(selector).forEach(td => {
+    const patentNum = td.textContent.trim();
+    if (!patentNum) return;
+
+    td.classList.add('patent-link');
+    td.addEventListener('mouseenter', () => showChainPopup(patentNum, td));
+    td.addEventListener('mouseleave', () => hideChainPopup());
+  });
+}

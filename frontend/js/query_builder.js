@@ -2,7 +2,7 @@
  * query_builder.js – Boolean Query Builder panel logic (Tab 2).
  */
 
-import { apiPost, apiGet, setLoading, buildInteractiveTable, escHtml } from './app.js';
+import { apiPost, apiGet, setLoading, buildInteractiveTable, escHtml, enableAssignmentPopup } from './app.js';
 
 const conditionsContainer = document.getElementById('qb-conditions');
 const addBtn              = document.getElementById('qb-add-btn');
@@ -272,6 +272,8 @@ executeBtn.addEventListener('click', async () => {
     hdr.innerHTML = `<strong>Query Results</strong><span class="results-count">${result.total_rows} record(s) returned</span>`;
     resultsDiv.appendChild(hdr);
     buildInteractiveTable(resultsDiv, result.rows);
+    // Enable assignment popup on patent_number columns
+    enableAssignmentPopup('#tab-query-builder td[data-col="patent_number"]');
     resultsDiv.classList.remove('hidden');
   } catch (err) {
     resultsDiv.innerHTML = `<p class="status-msg error">${escHtml(err.message)}</p>`;
