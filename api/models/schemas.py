@@ -7,43 +7,35 @@ from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
-# Shared sub-models
-# ---------------------------------------------------------------------------
-
-class Applicant(BaseModel):
-    name: Optional[str] = None
-    street_address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
-    entity_type: Optional[str] = None
-
-
-class Assignee(BaseModel):
-    name: Optional[str] = None
-    street_address: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
-
-
-# ---------------------------------------------------------------------------
-# Patent records
+# Patent records (v2 flat schema — no nested arrays)
 # ---------------------------------------------------------------------------
 
 class PatentRecord(BaseModel):
-    patent_number: Optional[str] = None
     application_number: Optional[str] = None
+    patent_number: Optional[str] = None
     invention_title: Optional[str] = None
+    filing_date: Optional[str] = None
     grant_date: Optional[str] = None
-    applicants: List[Applicant] = []
+    entity_status: Optional[str] = None
+    small_entity_indicator: Optional[bool] = None
+    application_type: Optional[str] = None
+    application_status: Optional[str] = None
+    first_inventor_name: Optional[str] = None
+    first_applicant_name: Optional[str] = None
+    examiner_name: Optional[str] = None
+    group_art_unit: Optional[str] = None
 
 
 class AssignmentRecord(BaseModel):
-    patent_number: Optional[str] = None
-    application_number: Optional[str] = None
+    reel_frame: Optional[str] = None
+    doc_number: Optional[str] = None
     recorded_date: Optional[str] = None
-    assignees: List[Assignee] = []
+    conveyance_text: Optional[str] = None
+    assignor_name: Optional[str] = None
+    assignee_name: Optional[str] = None
+    assignee_city: Optional[str] = None
+    assignee_state: Optional[str] = None
+    assignee_country: Optional[str] = None
 
 
 class MaintenanceFeeRecord(BaseModel):
@@ -51,7 +43,6 @@ class MaintenanceFeeRecord(BaseModel):
     application_number: Optional[str] = None
     event_code: Optional[str] = None
     event_date: Optional[str] = None
-    fee_code: Optional[str] = None
     entity_status: Optional[str] = None
 
 
@@ -79,8 +70,9 @@ class MDMDeleteRequest(BaseModel):
 
 
 class Address(BaseModel):
-    street_address: Optional[str] = None
     city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
 
 
 class MDMAddressRequest(BaseModel):

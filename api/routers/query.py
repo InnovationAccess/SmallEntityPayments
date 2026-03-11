@@ -17,56 +17,56 @@ from api.routers.mdm import _parse_boolean_query
 router = APIRouter(prefix="/query", tags=["Query"])
 
 # Allowed fields grouped by table, with the SQL expression to reference them.
+# v2 tables use flat (denormalized) schema — no UNNEST needed.
 _TABLE_FIELDS: Dict[str, Dict[str, str]] = {
     "patent_file_wrapper": {
         "patent_number": "p.patent_number",
         "application_number": "p.application_number",
         "invention_title": "p.invention_title",
         "grant_date": "CAST(p.grant_date AS STRING)",
-        "applicant_name": "app.name",
-        "applicant_street_address": "app.street_address",
-        "applicant_city": "app.city",
-        "applicant_state": "app.state",
-        "applicant_country": "app.country",
-        "applicant_entity_type": "app.entity_type",
+        "filing_date": "CAST(p.filing_date AS STRING)",
+        "applicant_name": "p.first_applicant_name",
+        "inventor_name": "p.first_inventor_name",
+        "entity_status": "p.entity_status",
+        "examiner_name": "p.examiner_name",
+        "group_art_unit": "p.group_art_unit",
+        "application_type": "p.application_type",
+        "application_status": "p.application_status",
     },
     "patent_assignments": {
-        "patent_number": "a.patent_number",
-        "application_number": "a.application_number",
+        "patent_number": "a.doc_number",
         "recorded_date": "CAST(a.recorded_date AS STRING)",
-        "assignee_name": "asgn.name",
-        "assignee_street_address": "asgn.street_address",
-        "assignee_city": "asgn.city",
-        "assignee_state": "asgn.state",
-        "assignee_country": "asgn.country",
+        "assignee_name": "a.assignee_name",
+        "assignee_city": "a.assignee_city",
+        "assignee_state": "a.assignee_state",
+        "assignee_country": "a.assignee_country",
+        "assignor_name": "a.assignor_name",
+        "conveyance_text": "a.conveyance_text",
+        "reel_frame": "a.reel_frame",
     },
     "maintenance_fee_events": {
         "patent_number": "m.patent_number",
         "application_number": "m.application_number",
         "event_code": "m.event_code",
         "event_date": "CAST(m.event_date AS STRING)",
-        "fee_code": "m.fee_code",
         "entity_status": "m.entity_status",
     },
 }
 
-_UNNEST_FIELDS_PATENT = {
-    "applicant_name", "applicant_street_address", "applicant_city",
-    "applicant_state", "applicant_country", "applicant_entity_type",
-}
-_UNNEST_FIELDS_ASSIGNMENT = {
-    "assignee_name", "assignee_street_address", "assignee_city",
-    "assignee_state", "assignee_country",
-}
-
 # Fields that represent entity names (for name expansion).
-_NAME_FIELDS = {"applicant_name", "assignee_name"}
+_NAME_FIELDS = {"applicant_name", "inventor_name", "assignee_name", "assignor_name"}
 
 # Code fields that support multi-value selection (comma-separated).
-_CODE_FIELDS = {"event_code", "fee_code"}
+_CODE_FIELDS = {"event_code"}
 
 _ALLOWED_OPERATORS = {"CONTAINS", "EQUALS", "STARTS_WITH", "ENDS_WITH", "AFTER", "BEFORE"}
 _VALID_TABLES = {"patent_file_wrapper", "patent_assignments", "maintenance_fee_events"}
+# Keep old table names as aliases for backward compatibility
+_TABLE_ALIAS = {
+    "patent_file_wrapper": "patent_file_wrapper",
+    "patent_assignments": "patent_assignments",
+    "maintenance_fee_events": "maintenance_fee_events",
+}
 
 
 def _build_condition(col_expr: str, operator: str, param_name: str) -> str:
@@ -100,59 +100,48 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
     if not tables:
         raise ValueError("At least one valid table must be selected.")
 
-    # Determine which fields are used and validate them.
-    used_fields: Set[str] = set()
-    for cond in query.conditions:
-        used_fields.add(cond.field)
-
     # Build FROM clause with appropriate JOINs.
-    needs_patent_unnest = bool(used_fields & _UNNEST_FIELDS_PATENT) and "patent_file_wrapper" in tables
-    needs_assignment_unnest = bool(used_fields & _UNNEST_FIELDS_ASSIGNMENT) and "patent_assignments" in tables
-
+    # v2 flat schema: no UNNEST needed — all fields are direct columns.
     from_parts: List[str] = []
     select_parts: List[str] = []
 
     if "patent_file_wrapper" in tables:
         from_parts.append(f"`{settings.patent_table}` AS p")
-        if needs_patent_unnest:
-            from_parts.append("CROSS JOIN UNNEST(p.applicants) AS app")
         select_parts.extend([
             "p.patent_number", "p.application_number", "p.invention_title",
             "CAST(p.grant_date AS STRING) AS grant_date",
+            "p.first_applicant_name AS applicant_name",
+            "p.entity_status",
         ])
 
     if "patent_assignments" in tables:
-        join_on = ""
         if "patent_file_wrapper" in tables:
-            join_on = (
+            from_parts.append(
                 f"JOIN `{settings.assignments_table}` AS a "
-                f"ON (a.patent_number = p.patent_number AND a.patent_number IS NOT NULL) "
-                f"OR (a.application_number = p.application_number AND a.application_number IS NOT NULL)"
+                f"ON a.doc_number = p.patent_number AND p.patent_number IS NOT NULL"
             )
         else:
             from_parts.append(f"`{settings.assignments_table}` AS a")
-        if join_on:
-            from_parts.append(join_on)
-        if needs_assignment_unnest:
-            from_parts.append("CROSS JOIN UNNEST(a.assignees) AS asgn")
-        if "patent_file_wrapper" not in tables:
-            select_parts.extend(["a.patent_number", "a.application_number"])
-        select_parts.append("CAST(a.recorded_date AS STRING) AS recorded_date")
+            select_parts.extend(["a.doc_number AS patent_number"])
+        select_parts.extend([
+            "CAST(a.recorded_date AS STRING) AS recorded_date",
+            "a.assignee_name", "a.assignor_name",
+        ])
 
     if "maintenance_fee_events" in tables:
         if from_parts:
             base_alias = "p" if "patent_file_wrapper" in tables else "a"
+            base_col = "patent_number" if base_alias == "p" else "doc_number"
             from_parts.append(
                 f"JOIN `{settings.maintenance_table}` AS m "
-                f"ON (m.patent_number = {base_alias}.patent_number AND m.patent_number IS NOT NULL) "
-                f"OR (m.application_number = {base_alias}.application_number AND m.application_number IS NOT NULL)"
+                f"ON m.patent_number = {base_alias}.{base_col} AND m.patent_number IS NOT NULL"
             )
         else:
             from_parts.append(f"`{settings.maintenance_table}` AS m")
             select_parts.extend(["m.patent_number", "m.application_number"])
         select_parts.extend([
             "m.event_code", "CAST(m.event_date AS STRING) AS event_date",
-            "m.fee_code", "m.entity_status",
+            "m.entity_status AS maint_entity_status",
         ])
 
     # Build WHERE clause.
@@ -223,27 +212,26 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
     main_sql = f"SELECT DISTINCT {', '.join(select_parts)} FROM {from_sql} {where} LIMIT {query.limit}"
 
     # Wrap in CTEs to add applicant and recent assignee name columns.
+    # v2 tables have flat schema: first_applicant_name is a direct column,
+    # and assignee_name is already denormalized in patent_assignments_v2.
     sql = f"""
     WITH main_results AS (
       {main_sql}
     ),
     applicant_names AS (
       SELECT pfw.patent_number,
-        ARRAY_AGG(app_sub.name LIMIT 1)[OFFSET(0)] AS applicant_name
+        pfw.first_applicant_name AS applicant_name
       FROM `{settings.patent_table}` pfw
-      CROSS JOIN UNNEST(pfw.applicants) AS app_sub
       WHERE pfw.patent_number IN (SELECT patent_number FROM main_results WHERE patent_number IS NOT NULL)
-        AND app_sub.name IS NOT NULL
-      GROUP BY pfw.patent_number
+        AND pfw.first_applicant_name IS NOT NULL
     ),
     recent_assignees AS (
-      SELECT pa.patent_number,
-        ARRAY_AGG(asgn_sub.name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)] AS recent_assignee_name
+      SELECT pa.doc_number AS patent_number,
+        ARRAY_AGG(pa.assignee_name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)] AS recent_assignee_name
       FROM `{settings.assignments_table}` pa
-      CROSS JOIN UNNEST(pa.assignees) AS asgn_sub
-      WHERE pa.patent_number IN (SELECT patent_number FROM main_results WHERE patent_number IS NOT NULL)
-        AND asgn_sub.name IS NOT NULL
-      GROUP BY pa.patent_number
+      WHERE pa.doc_number IN (SELECT patent_number FROM main_results WHERE patent_number IS NOT NULL)
+        AND pa.assignee_name IS NOT NULL
+      GROUP BY pa.doc_number
     )
     SELECT mr.*, an.applicant_name, ra.recent_assignee_name
     FROM main_results mr
@@ -311,14 +299,14 @@ def list_event_codes() -> dict:
     return {"codes": [row["event_code"] for row in rows]}
 
 
-@router.get("/fee-codes")
-def list_fee_codes() -> dict:
-    """Return distinct fee_code values from maintenance_fee_events."""
+@router.get("/entity-statuses")
+def list_entity_statuses() -> dict:
+    """Return distinct entity_status values from maintenance_fee_events_v2."""
     sql = f"""
-    SELECT DISTINCT fee_code
+    SELECT DISTINCT entity_status
     FROM `{settings.maintenance_table}`
-    WHERE fee_code IS NOT NULL
-    ORDER BY fee_code
+    WHERE entity_status IS NOT NULL
+    ORDER BY entity_status
     """
     rows = bq_service.run_query(sql)
-    return {"codes": [row["fee_code"] for row in rows]}
+    return {"statuses": [row["entity_status"] for row in rows]}

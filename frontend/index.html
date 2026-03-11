@@ -19,6 +19,7 @@
         <button class="tab-btn active" data-tab="mdm"           role="tab" aria-selected="true">MDM&nbsp;Name&nbsp;Normalization</button>
         <button class="tab-btn"        data-tab="query-builder" role="tab" aria-selected="false">Boolean&nbsp;Query&nbsp;Builder</button>
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
+        <button class="tab-btn"        data-tab="citations"     role="tab" aria-selected="false">Forward&nbsp;Citations</button>
       </nav>
     </div>
   </header>
@@ -147,6 +148,74 @@
       <div id="ai-results" class="results-area hidden"></div>
     </section>
 
+    <!-- ===== Tab 4: Forward Citations ===== -->
+    <section id="tab-citations" class="tab-panel" role="tabpanel">
+      <h2 class="panel-title">Forward Citation Lookup</h2>
+      <p class="panel-desc">
+        Enter a patent number to see which later-granted patents cite it.
+        Results include citation category (examiner vs. applicant),
+        counts by year, and a summary.
+      </p>
+
+      <div class="card">
+        <h3 class="card-title">Search by Patent Number</h3>
+        <div class="mdm-search-row">
+          <input id="cite-search-input" type="text"
+                 placeholder="e.g. 7654321 or US7,654,321 or RE49123" />
+          <button id="cite-search-btn" class="btn btn-primary">Look Up</button>
+        </div>
+      </div>
+
+      <!-- Summary -->
+      <div id="cite-summary" class="card hidden">
+        <h3 class="card-title">Citation Summary for <span id="cite-patent-label"></span></h3>
+        <div class="cite-summary-grid">
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="cite-total">0</span>
+            <span class="cite-stat-label">Total Citations</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="cite-examiner">0</span>
+            <span class="cite-stat-label">By Examiner</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="cite-applicant">0</span>
+            <span class="cite-stat-label">By Applicant</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="cite-range">-</span>
+            <span class="cite-stat-label">Date Range</span>
+          </div>
+        </div>
+        <div id="cite-by-year" class="cite-by-year"></div>
+      </div>
+
+      <!-- Citation table -->
+      <div id="cite-results" class="results-area hidden">
+        <div class="results-header">
+          <strong>Citing Patents</strong>
+          <span id="cite-results-count" class="results-count"></span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="cite-table">
+            <thead>
+              <tr>
+                <th>Citing Patent</th>
+                <th>Grant Date</th>
+                <th>Application #</th>
+                <th>Filing Date</th>
+                <th>Category</th>
+                <th>Kind</th>
+              </tr>
+            </thead>
+            <tbody id="cite-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="cite-status" class="status-msg hidden"></div>
+    </section>
+
   </main>
 
   <!-- ===== Address Modal ===== -->
@@ -200,5 +269,6 @@
   <script src="/static/js/mdm.js?v=7"           type="module"></script>
   <script src="/static/js/query_builder.js?v=7" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>
+  <script src="/static/js/citations.js?v=1"    type="module"></script>
 </body>
 </html>

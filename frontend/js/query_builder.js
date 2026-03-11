@@ -14,9 +14,9 @@ const tablesSelect        = document.getElementById('qb-tables');
 let fieldsByTable      = {};
 let activeLogic        = 'AND';
 
-const _DATE_FIELDS = new Set(['grant_date', 'recorded_date', 'event_date']);
-const _CODE_FIELDS = new Set(['event_code', 'fee_code']);
-const _NAME_FIELDS_SET = new Set(['applicant_name', 'assignee_name']);
+const _DATE_FIELDS = new Set(['grant_date', 'filing_date', 'recorded_date', 'event_date']);
+const _CODE_FIELDS = new Set(['event_code']);
+const _NAME_FIELDS_SET = new Set(['applicant_name', 'inventor_name', 'assignee_name', 'assignor_name']);
 
 const _TEXT_OPS = ['CONTAINS', 'EQUALS', 'STARTS_WITH', 'ENDS_WITH'];
 const _DATE_OPS = ['AFTER', 'BEFORE', 'EQUALS'];
@@ -41,28 +41,24 @@ function getOperatorsForField(field) {
     fieldsByTable = {
       patent_file_wrapper: [
         'patent_number', 'application_number', 'invention_title', 'grant_date',
-        'applicant_name', 'applicant_city', 'applicant_state',
-        'applicant_country', 'applicant_entity_type',
+        'filing_date', 'applicant_name', 'inventor_name', 'entity_status',
+        'examiner_name', 'group_art_unit', 'application_type', 'application_status',
       ],
       patent_assignments: [
-        'patent_number', 'application_number', 'recorded_date',
+        'patent_number', 'recorded_date',
         'assignee_name', 'assignee_city', 'assignee_state', 'assignee_country',
+        'assignor_name', 'conveyance_text', 'reel_frame',
       ],
       maintenance_fee_events: [
-        'patent_number', 'application_number', 'event_code', 'event_date', 'fee_code', 'entity_status',
+        'patent_number', 'application_number', 'event_code', 'event_date', 'entity_status',
       ],
     };
   }
 
-  // Fetch code dropdown lists in parallel (non-critical).
-  await Promise.all([
-    apiGet('/query/event-codes')
-      .then(r => { _CODE_FIELD_DATA.event_code = r.codes || []; })
-      .catch(() => {}),
-    apiGet('/query/fee-codes')
-      .then(r => { _CODE_FIELD_DATA.fee_code = r.codes || []; })
-      .catch(() => {}),
-  ]);
+  // Fetch code dropdown lists (non-critical).
+  await apiGet('/query/event-codes')
+    .then(r => { _CODE_FIELD_DATA.event_code = r.codes || []; })
+    .catch(() => {});
 
   addConditionRow();
 })();

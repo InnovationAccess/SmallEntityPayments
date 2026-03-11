@@ -38,7 +38,7 @@ let sortColumn         = 'frequency';
 let sortDirection      = 'desc';
 
 // Address modal state
-let addressData           = [];    // [{street_address, city}]
+let addressData           = [];    // [{city, state, country}]
 let selectedAddresses     = new Set();
 let lastAddrCheckboxIndex = null;
 let addressEntityName     = '';
@@ -316,7 +316,7 @@ function renderAddressList() {
   }
 
   addressList.innerHTML = addressData.map((addr, i) => {
-    const label = [addr.street_address, addr.city].filter(Boolean).join(', ') || '(no address)';
+    const label = [addr.city, addr.state, addr.country].filter(Boolean).join(', ') || '(no address)';
     const checked = selectedAddresses.has(i) ? 'checked' : '';
     return `<div class="address-item" data-index="${i}">
       <input type="checkbox" class="address-checkbox" ${checked} />

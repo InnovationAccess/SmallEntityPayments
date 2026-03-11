@@ -184,28 +184,23 @@ class BigQueryService:
     # ------------------------------------------------------------------
 
     def get_addresses(self, name: str) -> List[Dict[str, Any]]:
-        """Return unique addresses for an entity name. If the name is a
-        representative, aggregates addresses from all associated names."""
-        # First get all names to search for (representative + associated).
+        """Return unique addresses for an entity name from assignment records.
+
+        v2 schema: patent_assignments_v2 has flat assignee address columns.
+        patent_file_wrapper_v2 does not have address fields.
+        """
         names = self._get_all_names_for(name)
 
         params: List[bigquery.ScalarQueryParameter] = []
         in_clause, params = self._build_in_clause(names, "addr_name", params)
 
         sql = f"""
-        WITH addresses AS (
-          SELECT app.street_address, app.city
-          FROM `{settings.patent_table}`, UNNEST(applicants) AS app
-          WHERE app.name IN ({in_clause})
-          UNION ALL
-          SELECT asgn.street_address, asgn.city
-          FROM `{settings.assignments_table}`, UNNEST(assignees) AS asgn
-          WHERE asgn.name IN ({in_clause})
-        )
-        SELECT DISTINCT street_address, city
-        FROM addresses
-        WHERE street_address IS NOT NULL OR city IS NOT NULL
-        ORDER BY city, street_address
+        SELECT DISTINCT assignee_city AS city, assignee_state AS state,
+               assignee_country AS country
+        FROM `{settings.assignments_table}`
+        WHERE assignee_name IN ({in_clause})
+          AND (assignee_city IS NOT NULL OR assignee_state IS NOT NULL)
+        ORDER BY assignee_city, assignee_state
         LIMIT 500
         """
         return self.run_query(sql, params)
@@ -214,7 +209,10 @@ class BigQueryService:
         self,
         addresses: List[Dict[str, Optional[str]]],
     ) -> List[Dict[str, Any]]:
-        """Find entity names at given addresses across both tables."""
+        """Find entity names at given addresses from assignment records.
+
+        v2 schema: uses flat assignee_city/assignee_state columns.
+        """
         if not addresses:
             return []
 
@@ -223,17 +221,23 @@ class BigQueryService:
 
         for i, addr in enumerate(addresses):
             parts: List[str] = []
-            if addr.get("street_address"):
-                pname = f"street_{i}"
-                parts.append(f"UPPER(street_address) = UPPER(@{pname})")
-                params.append(
-                    bigquery.ScalarQueryParameter(pname, "STRING", addr["street_address"])
-                )
             if addr.get("city"):
                 pname = f"city_{i}"
-                parts.append(f"UPPER(city) = UPPER(@{pname})")
+                parts.append(f"UPPER(assignee_city) = UPPER(@{pname})")
                 params.append(
                     bigquery.ScalarQueryParameter(pname, "STRING", addr["city"])
+                )
+            if addr.get("state"):
+                pname = f"state_{i}"
+                parts.append(f"UPPER(assignee_state) = UPPER(@{pname})")
+                params.append(
+                    bigquery.ScalarQueryParameter(pname, "STRING", addr["state"])
+                )
+            if addr.get("country"):
+                pname = f"country_{i}"
+                parts.append(f"UPPER(assignee_country) = UPPER(@{pname})")
+                params.append(
+                    bigquery.ScalarQueryParameter(pname, "STRING", addr["country"])
                 )
             if parts:
                 addr_conditions.append("(" + " AND ".join(parts) + ")")
@@ -245,13 +249,9 @@ class BigQueryService:
 
         sql = f"""
         WITH addr_names AS (
-          SELECT DISTINCT app.name AS entity_name
-          FROM `{settings.patent_table}`, UNNEST(applicants) AS app
-          WHERE ({addr_where}) AND app.name IS NOT NULL
-          UNION DISTINCT
-          SELECT DISTINCT asgn.name AS entity_name
-          FROM `{settings.assignments_table}`, UNNEST(assignees) AS asgn
-          WHERE ({addr_where}) AND asgn.name IS NOT NULL
+          SELECT DISTINCT assignee_name AS entity_name
+          FROM `{settings.assignments_table}`
+          WHERE ({addr_where}) AND assignee_name IS NOT NULL
         )
         SELECT
           an.entity_name AS raw_name,

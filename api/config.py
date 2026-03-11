@@ -13,15 +13,15 @@ class Settings:
 
     @property
     def patent_table(self) -> str:
-        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_file_wrapper"
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_file_wrapper_v2"
 
     @property
     def assignments_table(self) -> str:
-        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments"
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments_v2"
 
     @property
     def maintenance_table(self) -> str:
-        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.maintenance_fee_events"
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.maintenance_fee_events_v2"
 
     @property
     def unification_table(self) -> str:
@@ -30,6 +30,18 @@ class Settings:
     @property
     def entity_names_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.entity_names"
+
+    @property
+    def forward_citations_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.forward_citations"
+
+    @property
+    def pfw_transactions_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_transactions"
+
+    @property
+    def pfw_continuity_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_continuity"
 
 
 settings = Settings()

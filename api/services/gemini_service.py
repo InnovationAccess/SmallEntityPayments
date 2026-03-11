@@ -13,111 +13,147 @@ from api.config import settings
 # BigQuery schema description injected into every prompt so Gemini understands
 # the available tables and columns.
 _SCHEMA_CONTEXT = """
-You have access to a Google BigQuery dataset called `uspto_data` with the following tables:
+You have access to a Google BigQuery dataset called `uspto_data` with the following tables.
+All tables use a FLAT (denormalized) schema — there are NO nested ARRAY or STRUCT columns.
 
-Table: patent_file_wrapper
-  - patent_number      STRING   (nullable – NULL for pending applications)
-  - application_number STRING   (USPTO application number)
-  - invention_title    STRING
-  - grant_date         DATE
-  - applicants         ARRAY<STRUCT<name STRING, street_address STRING, city STRING, state STRING, country STRING, entity_type STRING>>
+Table: patent_file_wrapper_v2
+  - application_number       STRING NOT NULL  (USPTO application number, primary key)
+  - patent_number            STRING           (nullable – NULL for pending applications)
+  - invention_title          STRING
+  - filing_date              DATE
+  - effective_filing_date    DATE
+  - grant_date               DATE
+  - entity_status            STRING           (SMALL | MICRO | LARGE | UNDISCOUNTED)
+  - small_entity_indicator   BOOLEAN
+  - application_type         STRING
+  - application_type_category STRING
+  - application_status_code  INT64
+  - application_status       STRING
+  - first_inventor_name      STRING           (first listed inventor)
+  - first_applicant_name     STRING           (first listed applicant/owner)
+  - examiner_name            STRING
+  - group_art_unit           STRING
+  - customer_number          INT64
+  - earliest_publication_number STRING
+  - earliest_publication_date DATE
+  - national_stage_indicator BOOLEAN
+  - first_inventor_to_file   BOOLEAN
 
-Table: patent_assignments
-  - patent_number      STRING   (nullable – NULL for ungranted applications)
-  - application_number STRING   (USPTO application number)
-  - recorded_date      DATE
-  - assignees          ARRAY<STRUCT<name STRING, street_address STRING, city STRING, state STRING, country STRING>>
+Table: patent_assignments_v2
+  - reel_frame               STRING NOT NULL  (reel/frame number)
+  - doc_number               STRING NOT NULL  (patent or application number)
+  - recorded_date            DATE NOT NULL
+  - last_update_date         DATE
+  - conveyance_text          STRING           (e.g. ASSIGNMENT, SECURITY AGREEMENT)
+  - assignor_name            STRING           (entity transferring rights)
+  - assignor_execution_date  DATE
+  - assignee_name            STRING           (entity receiving rights)
+  - assignee_city            STRING
+  - assignee_state           STRING
+  - assignee_country         STRING
+  - assignee_postcode        STRING
+  - correspondent_name       STRING
+  - invention_title          STRING
+  - page_count               INT64
 
-Table: maintenance_fee_events
-  - patent_number      STRING
-  - application_number STRING
-  - event_code         STRING
-  - event_date         DATE
-  - fee_code           STRING
-  - entity_status      STRING   (SMALL | MICRO | LARGE)
+Table: maintenance_fee_events_v2
+  - patent_number            STRING NOT NULL
+  - application_number       STRING
+  - entity_status            STRING           (SMALL | MICRO | LARGE | UNDISCOUNTED)
+  - filing_date              DATE
+  - grant_date               DATE
+  - event_date               DATE
+  - event_code               STRING
+
+Table: pfw_transactions
+  - application_number       STRING NOT NULL
+  - event_date               DATE
+  - event_code               STRING
+  - event_description        STRING
+
+Table: pfw_continuity
+  - application_number       STRING NOT NULL
+  - claim_parentage_type_code STRING
+  - claim_parentage_description STRING
+  - parent_application_number STRING
+  - parent_filing_date       DATE
+  - child_application_number STRING
+  - parent_patent_number     STRING
+  - parent_status_code       INT64
+  - parent_status_description STRING
+
+Table: forward_citations
+  - citing_patent_number     STRING NOT NULL   (the patent that cites another)
+  - citing_grant_date        DATE
+  - cited_patent_number      STRING NOT NULL   (the patent being cited)
+  - citation_category        STRING
 
 Table: name_unification
-  - representative_name STRING  (the canonical entity name)
-  - associated_name     STRING  (a variant/typo name linked to the representative)
+  - representative_name      STRING  (the canonical entity name)
+  - associated_name          STRING  (a variant/typo name linked to the representative)
 
 Table: entity_names
-  - entity_name  STRING   (unique entity name from applicants/assignees)
-  - frequency    INT64    (total occurrence count across all patent tables)
+  - entity_name              STRING  (unique entity name from applicants/assignees)
+  - frequency                INT64   (total occurrence count across all patent tables)
 
 BIGQUERY SQL RULES (you MUST follow these — violations cause query failures):
 1. NEVER write `SELECT expression WHERE condition` without a FROM clause.
-   BigQuery requires FROM before WHERE. Wrong: `SELECT 'x' WHERE y`. Right: use
-   a CTE or subquery that has a FROM clause.
+   BigQuery requires FROM before WHERE.
 2. Do NOT use correlated subqueries that reference other CTEs or tables.
    Use JOINs instead.
 3. Do NOT end queries with a semicolon.
-4. Use CROSS JOIN UNNEST(...) for nested ARRAY fields (not comma UNNEST).
-5. ARRAY_AGG syntax: the OFFSET accessor goes OUTSIDE the function call on the
-   resulting array, never inside the function arguments. Correct syntax:
+4. There are NO ARRAY columns in any table — do NOT use UNNEST anywhere.
+   All columns are scalar (flat). Just use direct column references.
+5. ARRAY_AGG syntax: the OFFSET accessor goes OUTSIDE the function call:
      ARRAY_AGG(expr ORDER BY col DESC LIMIT 1)[OFFSET(0)]
-   Wrong: ARRAY_AGG(expr OFFSET 0) — this will fail.
-6. When using CASE expressions inside ARRAY_AGG or other aggregate functions,
-   make sure the entire expression is valid BigQuery SQL. Test mentally that
-   each SELECT has a FROM clause.
+6. When using CASE expressions inside aggregate functions, make sure each
+   SELECT has a FROM clause.
 
 COMPREHENSIVE RESULTS RULE (IMPORTANT):
-Always produce rich, comprehensive results by JOINing related tables. The tables
-are linked via patent_number and application_number. When a query involves any
-table, JOIN the other tables to include as many useful columns as possible:
-- patent_file_wrapper: invention_title, grant_date, applicant name/address/entity_type
-- patent_assignments: assignee name/address, recorded_date
-- maintenance_fee_events: event_code, event_date, fee_code, entity_status
+Always produce rich, comprehensive results by JOINing related tables:
+- patent_file_wrapper_v2 joins to patent_assignments_v2 ON patent_number = doc_number
+- patent_file_wrapper_v2 joins to maintenance_fee_events_v2 ON patent_number
+- patent_file_wrapper_v2 joins to pfw_transactions ON application_number
+- patent_file_wrapper_v2 joins to pfw_continuity ON application_number
+- forward_citations joins ON cited_patent_number or citing_patent_number
 
-For example, if the user asks about maintenance fee payments for an entity, do NOT
-select only from maintenance_fee_events. Instead, JOIN patent_file_wrapper and
-patent_assignments to also include invention_title, grant_date, applicant_name,
-assignee_name, etc. Use LEFT JOINs so rows are not lost when a patent exists in
-one table but not another.
+When a query involves any table, JOIN related tables to include useful columns:
+- patent_file_wrapper_v2: invention_title, grant_date, first_applicant_name, entity_status
+- patent_assignments_v2: assignee_name, assignee_city, assignee_state, recorded_date
+- maintenance_fee_events_v2: event_code, event_date, entity_status
+- forward_citations: citing_patent_number, citing_grant_date
 
-UNNEST WITH LEFT JOIN RULE (CRITICAL):
-When you LEFT JOIN a table that has ARRAY fields, you MUST NOT use CROSS JOIN UNNEST
-on that table's arrays — it converts the LEFT JOIN into an effective INNER JOIN
-(drops rows where the LEFT JOIN produced NULL). Instead, flatten arrays into scalar
-values using a subquery or CTE with ARRAY_AGG(...LIMIT 1)[OFFSET(0)].
+Use LEFT JOINs so rows are not lost when a patent exists in one table but not another.
 
 Recommended pattern for getting applicant/assignee names alongside other data:
   WITH applicant_info AS (
     SELECT pfw.patent_number, pfw.invention_title, pfw.grant_date,
-      ARRAY_AGG(app.name LIMIT 1)[OFFSET(0)] AS applicant_name
-    FROM `uspto_data.patent_file_wrapper` pfw
-    CROSS JOIN UNNEST(pfw.applicants) AS app
-    WHERE app.name IS NOT NULL
-    GROUP BY pfw.patent_number, pfw.invention_title, pfw.grant_date
+      pfw.first_applicant_name AS applicant_name
+    FROM `uspto_data.patent_file_wrapper_v2` pfw
+    WHERE pfw.first_applicant_name IS NOT NULL
   ),
-  assignee_info AS (
-    SELECT pa.patent_number,
-      ARRAY_AGG(asgn.name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)] AS recent_assignee_name
-    FROM `uspto_data.patent_assignments` pa
-    CROSS JOIN UNNEST(pa.assignees) AS asgn
-    WHERE asgn.name IS NOT NULL
-    GROUP BY pa.patent_number
+  recent_assignees AS (
+    SELECT pa.doc_number AS patent_number,
+      ARRAY_AGG(pa.assignee_name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)]
+        AS recent_assignee_name
+    FROM `uspto_data.patent_assignments_v2` pa
+    WHERE pa.assignee_name IS NOT NULL
+    GROUP BY pa.doc_number
   )
 Then LEFT JOIN these CTEs to your main query on patent_number.
 
-SCALAR VALUES ONLY: Never return ARRAY columns in the final SELECT. Always flatten
-arrays to scalar values using ARRAY_AGG(...LIMIT 1)[OFFSET(0)] or similar. The
-frontend cannot display array columns.
-
 INCLUDE ALL RELEVANT COLUMNS: When querying a table, include ALL its useful columns
-in the SELECT, not just the ones mentioned in the filter. For maintenance_fee_events
-always include: patent_number, event_code, event_date, fee_code, entity_status.
-For patent_file_wrapper always include: patent_number, application_number,
-invention_title, grant_date. For patent_assignments always include: recorded_date.
+in the SELECT, not just the ones mentioned in the filter.
 
-When you need entity name frequency counts or want to list/search entities, prefer using the
-entity_names table over UNNESTing the raw applicants/assignees arrays, as it contains
-pre-computed aggregates. Use the raw tables only when you need address details or patent-level data.
+When you need entity name frequency counts or want to list/search entities, prefer
+the entity_names table. Use the raw tables only when you need address details or
+patent-level data.
 
 IMPORTANT: Entity names in the data are stored in UPPERCASE. Always use case-insensitive
 matching (UPPER or LOWER) when filtering by entity name.
 
 When filtering by entity name (applicant or assignee), use the name_unification
-table to expand the search. Use this exact pattern to find all name variants:
+table to expand the search:
 
   WITH name_variants AS (
     SELECT nu2.associated_name
@@ -127,12 +163,13 @@ table to expand the search. Use this exact pattern to find all name variants:
     WHERE LOWER(nu1.associated_name) = LOWER('Entity Name')
   )
 
-Then use: WHERE app.name IN (SELECT associated_name FROM name_variants)
+Then use: WHERE pfw.first_applicant_name IN (SELECT associated_name FROM name_variants)
+Or for assignments: WHERE pa.assignee_name IN (SELECT associated_name FROM name_variants)
 
-If no unification exists for the entity, fall back to case-insensitive matching directly:
-  WHERE LOWER(app.name) = LOWER('Entity Name')
+If no unification exists, fall back to case-insensitive matching:
+  WHERE LOWER(pfw.first_applicant_name) = LOWER('Entity Name')
 
-Use COALESCE or a LEFT JOIN pattern to handle both cases in a single query. Example:
+Use a LEFT JOIN pattern to handle both cases:
 
   WITH name_variants AS (
     SELECT nu2.associated_name
@@ -142,8 +179,9 @@ Use COALESCE or a LEFT JOIN pattern to handle both cases in a single query. Exam
     WHERE LOWER(nu1.associated_name) = LOWER('Entity Name')
   )
   ...
-  WHERE app.name IN (SELECT associated_name FROM name_variants)
-     OR (NOT EXISTS (SELECT 1 FROM name_variants) AND LOWER(app.name) = LOWER('Entity Name'))
+  WHERE pfw.first_applicant_name IN (SELECT associated_name FROM name_variants)
+     OR (NOT EXISTS (SELECT 1 FROM name_variants)
+         AND LOWER(pfw.first_applicant_name) = LOWER('Entity Name'))
 """
 
 _SYSTEM_PROMPT = (
