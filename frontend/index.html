@@ -211,12 +211,12 @@
           <table class="data-table" id="cite-table">
             <thead>
               <tr>
-                <th>Citing Patent</th>
-                <th>Application #</th>
-                <th>Citing Date</th>
-                <th>Category</th>
-                <th>Applicant / Assignee</th>
-                <th>Examiner</th>
+                <th data-sort-key="0">Citing Patent</th>
+                <th data-sort-key="1">Application #</th>
+                <th data-sort-key="2">Citing Date</th>
+                <th data-sort-key="3">Category</th>
+                <th data-sort-key="4">Applicant / Assignee</th>
+                <th data-sort-key="5">Examiner</th>
               </tr>
             </thead>
             <tbody id="cite-table-body"></tbody>
@@ -270,13 +270,13 @@
           <table class="data-table" id="etl-log-table">
             <thead>
               <tr>
-                <th>Status</th>
-                <th>Source</th>
-                <th>Started</th>
-                <th>Duration</th>
-                <th>Files</th>
-                <th>Rows</th>
-                <th>Details</th>
+                <th data-sort-key="0">Status</th>
+                <th data-sort-key="1">Source</th>
+                <th data-sort-key="2">Started</th>
+                <th data-sort-key="3">Duration</th>
+                <th data-sort-key="4">Files</th>
+                <th data-sort-key="5">Rows</th>
+                <th data-sort-key="6">Details</th>
               </tr>
             </thead>
             <tbody id="etl-log-body">
@@ -316,11 +316,11 @@
             <tr>
               <th style="width:30px"></th>
               <th style="width:30px"></th>
-              <th>Raw Name</th>
+              <th data-sort-key="2">Raw Name</th>
               <th style="width:30px"></th>
               <th style="width:30px"></th>
-              <th style="width:70px">Freq</th>
-              <th>Representative</th>
+              <th data-sort-key="5" style="width:70px">Freq</th>
+              <th data-sort-key="6">Representative</th>
               <th style="width:30px"></th>
               <th style="width:30px"></th>
             </tr>
@@ -338,11 +338,11 @@
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
 
-  <script src="/static/js/app.js?v=8"           type="module"></script>
-  <script src="/static/js/mdm.js?v=7"           type="module"></script>
+  <script src="/static/js/app.js?v=9"           type="module"></script>
+  <script src="/static/js/mdm.js?v=8"           type="module"></script>
   <script src="/static/js/query_builder.js?v=7" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>
-  <script src="/static/js/citations.js?v=2"    type="module"></script>
-  <script src="/static/js/etl_log.js?v=1"    type="module"></script>
+  <script src="/static/js/citations.js?v=3"    type="module"></script>
+  <script src="/static/js/etl_log.js?v=2"    type="module"></script>
 </body>
 </html>

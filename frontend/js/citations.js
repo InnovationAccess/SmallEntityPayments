@@ -5,7 +5,7 @@
  * /api/forward-citations/{patent_number}/summary
  */
 
-import { apiGet, setLoading, showStatus, escHtml } from './app.js';
+import { apiGet, setLoading, showStatus, escHtml, enableTableSorting, stampOriginalOrder } from './app.js';
 
 const searchInput   = document.getElementById('cite-search-input');
 const searchBtn     = document.getElementById('cite-search-btn');
@@ -20,8 +20,11 @@ const examListEl    = document.getElementById('cite-examiner-list');
 const applListEl    = document.getElementById('cite-applicant-list');
 const resultsArea   = document.getElementById('cite-results');
 const resultsCount  = document.getElementById('cite-results-count');
+const citeTable     = document.getElementById('cite-table');
 const tableBody     = document.getElementById('cite-table-body');
 const statusEl      = document.getElementById('cite-status');
+
+enableTableSorting(citeTable);
 
 function renderBreakdownList(container, items) {
   if (!items || items.length === 0) {
@@ -105,6 +108,7 @@ async function doSearch() {
         <td>${escHtml(c.citing_applicant_name || '')}</td>
         <td>${escHtml(c.citing_examiner_name || '')}</td>
       </tr>`).join('');
+      stampOriginalOrder(citeTable);
     }
 
     resultsArea.classList.remove('hidden');

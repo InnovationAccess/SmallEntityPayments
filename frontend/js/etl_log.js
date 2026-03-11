@@ -5,13 +5,16 @@
  * pipeline run history and per-source status.
  */
 
-import { apiGet, showStatus, escHtml } from './app.js';
+import { apiGet, showStatus, escHtml, enableTableSorting, stampOriginalOrder } from './app.js';
 
 const summaryGrid = document.getElementById('etl-summary-grid');
+const etlTable    = document.getElementById('etl-log-table');
 const logBody     = document.getElementById('etl-log-body');
 const logCount    = document.getElementById('etl-log-count');
 const refreshBtn  = document.getElementById('etl-refresh-btn');
 const statusEl    = document.getElementById('etl-status');
+
+enableTableSorting(etlTable);
 
 const SOURCE_LABELS = {
   ptblxml:  'Citations',
@@ -83,6 +86,7 @@ async function loadLog() {
         <td class="etl-detail">${escHtml(detailStr)}</td>
       </tr>`;
     }).join('');
+    stampOriginalOrder(etlTable);
 
   } catch (err) {
     showStatus(statusEl, `Error loading update log: ${err.message}`, 'error');

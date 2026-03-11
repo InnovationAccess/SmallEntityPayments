@@ -88,6 +88,83 @@ export function showStatus(el, message, type = 'success') {
 }
 
 /**
+ * Enable click-to-sort on any static <table>.
+ *
+ * Each <th> that should be sortable needs `data-sort-key="<colIndex>"` where
+ * colIndex is the 0-based column position in the table.  The function reads
+ * rows from <tbody>, detaches them, sorts, and reattaches.
+ *
+ * Adds the `.sortable` class and sort-direction indicators automatically.
+ *
+ * Usage:
+ *   enableTableSorting(document.getElementById('my-table'));
+ */
+export function enableTableSorting(tableEl) {
+  if (!tableEl) return;
+  const thead = tableEl.querySelector('thead');
+  const tbody = tableEl.querySelector('tbody');
+  if (!thead || !tbody) return;
+
+  let sortCol = null;
+  let sortDir = 0; // 0=none, 1=asc, -1=desc
+
+  const ths = thead.querySelectorAll('th[data-sort-key]');
+  ths.forEach(th => {
+    th.classList.add('sortable');
+    th.addEventListener('click', () => {
+      const colIdx = parseInt(th.dataset.sortKey, 10);
+
+      // Toggle direction
+      if (sortCol === colIdx) {
+        sortDir = sortDir === 1 ? -1 : sortDir === -1 ? 0 : 1;
+      } else {
+        sortCol = colIdx;
+        sortDir = 1;
+      }
+
+      // Update visual indicators
+      ths.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+      if (sortDir !== 0) {
+        th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+      }
+
+      // Sort rows
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      if (sortDir === 0) {
+        // Restore original order via data-orig-idx
+        rows.sort((a, b) => (a._origIdx ?? 0) - (b._origIdx ?? 0));
+      } else {
+        rows.sort((a, b) => {
+          const cellA = a.cells[colIdx]?.textContent.trim() ?? '';
+          const cellB = b.cells[colIdx]?.textContent.trim() ?? '';
+          // Try numeric comparison first
+          const numA = parseFloat(cellA);
+          const numB = parseFloat(cellB);
+          if (!isNaN(numA) && !isNaN(numB)) return sortDir * (numA - numB);
+          return sortDir * cellA.localeCompare(cellB, undefined, { numeric: true });
+        });
+      }
+
+      // Reattach sorted rows
+      rows.forEach(r => tbody.appendChild(r));
+    });
+  });
+}
+
+/**
+ * Stamp original row indices on current tbody rows so we can restore
+ * the original order after sorting.  Call this after populating the tbody.
+ */
+export function stampOriginalOrder(tableEl) {
+  if (!tableEl) return;
+  const tbody = tableEl.querySelector('tbody');
+  if (!tbody) return;
+  Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
+    tr._origIdx = i;
+  });
+}
+
+/**
  * Render an array of objects as a dynamic HTML table.
  * Infers columns from the keys of the first row.
  */

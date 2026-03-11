@@ -5,7 +5,7 @@
  * frequency sorting, address modal, and batch operations.
  */
 
-import { apiPost, apiDelete, setLoading, showStatus, escHtml } from './app.js';
+import { apiPost, apiDelete, setLoading, showStatus, escHtml, enableTableSorting, stampOriginalOrder } from './app.js';
 
 // ---- DOM references -------------------------------------------------------
 const searchInput   = document.getElementById('mdm-search-input');
@@ -26,8 +26,11 @@ const addrCloseBtn     = document.getElementById('addr-close-btn');
 
 // Address results modal
 const addrResultsModal    = document.getElementById('address-results-modal');
+const addrResultsTable    = document.getElementById('addr-results-table');
 const addrResultsBody     = document.getElementById('addr-results-body');
 const addrResultsCloseBtn = document.getElementById('addr-results-close-btn');
+
+enableTableSorting(addrResultsTable);
 
 // ---- State ----------------------------------------------------------------
 let workspaceData      = [];    // [{raw_name, frequency, representative_name}]
@@ -393,6 +396,7 @@ function renderAddrResultsTable() {
   addrResultsBody.innerHTML = addrResultsData.map((row, i) => {
     return buildRowForModal(row, i);
   }).join('');
+  stampOriginalOrder(addrResultsTable);
 }
 
 function buildRowForModal(row, index) {
