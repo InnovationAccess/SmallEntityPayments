@@ -20,6 +20,7 @@
         <button class="tab-btn"        data-tab="query-builder" role="tab" aria-selected="false">Boolean&nbsp;Query&nbsp;Builder</button>
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
         <button class="tab-btn"        data-tab="citations"     role="tab" aria-selected="false">Forward&nbsp;Citations</button>
+        <button class="tab-btn"        data-tab="etl-log"       role="tab" aria-selected="false">Update&nbsp;Log</button>
       </nav>
     </div>
   </header>
@@ -216,6 +217,68 @@
       <div id="cite-status" class="status-msg hidden"></div>
     </section>
 
+    <!-- ===== Tab 5: Data Update Log ===== -->
+    <section id="tab-etl-log" class="tab-panel" role="tabpanel">
+      <h2 class="panel-title">Data Update Log</h2>
+      <p class="panel-desc">
+        Automated pipeline run history. Each data source updates on its own
+        schedule from official USPTO bulk downloads.
+      </p>
+
+      <!-- Source summary cards -->
+      <div class="etl-summary-grid" id="etl-summary-grid">
+        <div class="etl-source-card">
+          <div class="etl-source-name">Citations</div>
+          <div class="etl-source-schedule">Weekly (Sun 2 AM)</div>
+          <div class="etl-source-last" id="etl-last-ptblxml">No runs yet</div>
+        </div>
+        <div class="etl-source-card">
+          <div class="etl-source-name">Assignments</div>
+          <div class="etl-source-schedule">Weekly (Mon 3 AM)</div>
+          <div class="etl-source-last" id="etl-last-pasdl">No runs yet</div>
+        </div>
+        <div class="etl-source-card">
+          <div class="etl-source-name">Maint. Fees</div>
+          <div class="etl-source-schedule">Monthly (1st, 4 AM)</div>
+          <div class="etl-source-last" id="etl-last-ptmnfee2">No runs yet</div>
+        </div>
+        <div class="etl-source-card">
+          <div class="etl-source-name">File Wrapper</div>
+          <div class="etl-source-schedule">Monthly (15th, 1 AM)</div>
+          <div class="etl-source-last" id="etl-last-ptfwpre">No runs yet</div>
+        </div>
+      </div>
+
+      <!-- Log table -->
+      <div class="card">
+        <div class="results-header">
+          <strong>Pipeline Run History</strong>
+          <span id="etl-log-count" class="results-count"></span>
+          <button id="etl-refresh-btn" class="btn btn-secondary" style="margin-left:auto">Refresh</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="data-table" id="etl-log-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Files</th>
+                <th>Rows</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="etl-log-body">
+              <tr><td colspan="7" class="text-muted">Click the Update Log tab to load data.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="etl-status" class="status-msg hidden"></div>
+    </section>
+
   </main>
 
   <!-- ===== Address Modal ===== -->
@@ -270,5 +333,6 @@
   <script src="/static/js/query_builder.js?v=7" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>
   <script src="/static/js/citations.js?v=1"    type="module"></script>
+  <script src="/static/js/etl_log.js?v=1"    type="module"></script>
 </body>
 </html>
