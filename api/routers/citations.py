@@ -159,15 +159,18 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
     year_rows = bq_service.run_query(year_sql, params)
     by_year = {int(row["year"]): row["count"] for row in year_rows}
 
-    # Examiner breakdown: each examiner and how many times they cited
+    # Examiner breakdown: only examiner-category citations
+    # Uses COALESCE so NULLs become 'Unknown' and totals match the KPI
     exam_sql = f"""
-    SELECT pfw.examiner_name AS name, COUNT(*) AS count
+    SELECT
+      COALESCE(pfw.examiner_name, 'Unknown') AS name,
+      COUNT(*) AS count
     FROM `{settings.forward_citations_table}` fc
     LEFT JOIN `{settings.patent_table}` pfw
       ON pfw.patent_number = fc.citing_patent_number
     WHERE fc.cited_patent_number = @patent_number
-      AND pfw.examiner_name IS NOT NULL
-    GROUP BY pfw.examiner_name
+      AND fc.citation_category = 'examiner'
+    GROUP BY name
     ORDER BY count DESC
     """
     exam_rows = bq_service.run_query(exam_sql, params)
@@ -175,10 +178,11 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
         {"name": r["name"], "count": r["count"]} for r in exam_rows
     ]
 
-    # Applicant breakdown: each normalized applicant and how many times they cited
+    # Applicant breakdown: only applicant-category citations
+    # Resolves names via name_unification; NULLs become 'Unknown'
     appl_sql = f"""
     SELECT
-      COALESCE(nu.representative_name, pfw.first_applicant_name) AS name,
+      COALESCE(nu.representative_name, pfw.first_applicant_name, 'Unknown') AS name,
       COUNT(*) AS count
     FROM `{settings.forward_citations_table}` fc
     LEFT JOIN `{settings.patent_table}` pfw
@@ -186,7 +190,7 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
     LEFT JOIN `{settings.unification_table}` nu
       ON nu.associated_name = pfw.first_applicant_name
     WHERE fc.cited_patent_number = @patent_number
-      AND pfw.first_applicant_name IS NOT NULL
+      AND fc.citation_category = 'applicant'
     GROUP BY name
     ORDER BY count DESC
     """
