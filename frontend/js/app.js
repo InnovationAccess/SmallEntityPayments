@@ -385,10 +385,26 @@ async function showChainPopup(patentNum, anchorEl) {
   _chainShowTimer = setTimeout(async () => {
     const popup = getOrCreatePopup();
 
-    // Position near the anchor
+    // Position to the right of the anchor, aligned to its top.
+    // If the popup would overflow the viewport bottom, shift it up.
     const rect = anchorEl.getBoundingClientRect();
-    popup.style.top = `${rect.bottom + window.scrollY + 4}px`;
-    popup.style.left = `${rect.left + window.scrollX}px`;
+    const vpH = window.innerHeight;
+    const popupH = 300; // estimated max height for initial placement
+
+    let top = rect.top + window.scrollY;
+    // If placing at anchor-top would push the popup off-screen, shift up
+    if (rect.top + popupH > vpH) {
+      top = Math.max(window.scrollY + 8, rect.bottom + window.scrollY - popupH);
+    }
+    popup.style.top = `${top}px`;
+    popup.style.left = `${rect.right + window.scrollX + 8}px`;
+
+    // If the popup would go off the right edge, flip it to the left side
+    const vpW = window.innerWidth;
+    if (rect.right + 8 + 500 > vpW) {
+      popup.style.left = `${Math.max(8, rect.left + window.scrollX - 510)}px`;
+    }
+
     popup.innerHTML = '<div class="chain-loading">Loading assignments\u2026</div>';
     popup.classList.remove('hidden');
 
