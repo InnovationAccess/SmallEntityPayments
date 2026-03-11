@@ -1,7 +1,7 @@
 # SmallEntityPayments — Project Instructions
 
 ## Quick Start
-- Read HANDOFF311.md for full project context, architecture, and current state
+- Read HANDOFF312.md for full project context, architecture, and current state
 - This project lives at: https://github.com/InnovationAccess/SmallEntityPayments
 - GCP Project: uspto-data-app
 - BigQuery Dataset: uspto_data (location: us-west1)
@@ -30,10 +30,12 @@
 - ETL: Cloud Run Jobs triggered by Cloud Scheduler, using gsutil/bq CLI tools
 - All BigQuery tables use flat/denormalized schemas (no STRUCT/ARRAY except cpc_codes)
 
-## Current State (2026-03-11)
+## Current State (2026-03-12)
 - All tables loaded: ~892M rows across 9 tables
 - 4 automated update pipelines running on Cloud Scheduler
 - 5 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Update Log
+- All tables have sticky headers, sortable columns, and assignment chain popup on patent numbers
+- Citation tab includes examiner/applicant breakdown lists with name normalization
 - ETL pipeline logging writes to `etl_log` BigQuery table
 
 ## Tech Stack
@@ -48,7 +50,8 @@
 - `/mdm/*` — MDM name normalization (api/routers/mdm.py)
 - `/query/*` — Boolean query builder (api/routers/query.py)
 - `/ai/*` — AI assistant (api/routers/ai_assistant.py)
-- `/api/forward-citations/*` — Citation lookup (api/routers/citations.py)
+- `/api/forward-citations/*` — Citation lookup with name resolution (api/routers/citations.py)
+- `/api/assignments/*` — Assignment chain lookup (api/routers/assignments.py)
 - `/api/etl-log/*` — Pipeline monitoring (api/routers/etl_log.py)
 
 ## ETL Pipeline
