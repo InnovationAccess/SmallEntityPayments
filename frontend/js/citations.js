@@ -80,11 +80,11 @@ async function doSearch() {
     } else {
       tableBody.innerHTML = citations.map(c => `<tr>
         <td>${escHtml(c.citing_patent_number || '')}</td>
-        <td>${escHtml(c.citing_grant_date || '')}</td>
         <td>${escHtml(c.citing_application_number || '')}</td>
         <td>${escHtml(c.citing_filing_date || '')}</td>
         <td><span class="cite-cat cite-cat-${escHtml(c.citation_category || 'unknown')}">${escHtml(c.citation_category || '')}</span></td>
-        <td>${escHtml(c.citing_kind_code || '')}</td>
+        <td>${escHtml(c.citing_applicant_name || '')}</td>
+        <td>${escHtml(c.citing_examiner_name || '')}</td>
       </tr>`).join('');
     }
 

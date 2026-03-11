@@ -45,7 +45,8 @@ def get_forward_citations(patent_number: str, limit: int = 500) -> Dict[str, Any
       fc.citation_category,
       fc.citing_kind_code,
       pfw.invention_title AS citing_invention_title,
-      pfw.first_applicant_name AS citing_applicant_name
+      pfw.first_applicant_name AS citing_applicant_name,
+      pfw.examiner_name AS citing_examiner_name
     FROM `{settings.forward_citations_table}` fc
     LEFT JOIN `{settings.patent_table}` pfw
       ON pfw.patent_number = fc.citing_patent_number
@@ -80,6 +81,7 @@ def get_forward_citations(patent_number: str, limit: int = 500) -> Dict[str, Any
             "citing_kind_code": row.get("citing_kind_code"),
             "citing_invention_title": row.get("citing_invention_title"),
             "citing_applicant_name": row.get("citing_applicant_name"),
+            "citing_examiner_name": row.get("citing_examiner_name"),
         })
 
     return {
