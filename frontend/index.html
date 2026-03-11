@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=2" />
 </head>
 <body>
 
@@ -54,7 +54,7 @@
           <span id="mdm-results-count" class="results-count"></span>
           <span id="mdm-active-rep" class="text-muted"></span>
         </div>
-        <div style="overflow-x:auto">
+        <div class="table-scroll-wrap">
           <table class="data-table" id="mdm-table">
             <thead>
               <tr>
@@ -205,7 +205,7 @@
           <strong>Citing Patents</strong>
           <span id="cite-results-count" class="results-count"></span>
         </div>
-        <div style="overflow-x:auto">
+        <div class="table-scroll-wrap">
           <table class="data-table" id="cite-table">
             <thead>
               <tr>
@@ -264,7 +264,7 @@
           <span id="etl-log-count" class="results-count"></span>
           <button id="etl-refresh-btn" class="btn btn-secondary" style="margin-left:auto">Refresh</button>
         </div>
-        <div style="overflow-x:auto">
+        <div class="table-scroll-wrap">
           <table class="data-table" id="etl-log-table">
             <thead>
               <tr>
@@ -308,7 +308,7 @@
     <div class="modal-backdrop" data-close="address-results-modal"></div>
     <div class="modal-content modal-content--wide">
       <h3 class="modal-title">Entities at Selected Addresses</h3>
-      <div style="overflow-x:auto">
+      <div class="table-scroll-wrap">
         <table class="data-table" id="addr-results-table">
           <thead>
             <tr>
@@ -336,7 +336,7 @@
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
 
-  <script src="/static/js/app.js?v=7"           type="module"></script>
+  <script src="/static/js/app.js?v=8"           type="module"></script>
   <script src="/static/js/mdm.js?v=7"           type="module"></script>
   <script src="/static/js/query_builder.js?v=7" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>

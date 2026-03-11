@@ -226,11 +226,21 @@ textarea { resize: vertical; }
   text-align: left;
   font-weight: 600;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 .data-table td {
   border-bottom: 1px solid var(--color-border);
   padding: .6rem .75rem;
   vertical-align: top;
+}
+
+/* Scrollable table containers — headers stay fixed while body scrolls */
+.table-scroll-wrap {
+  max-height: 70vh;
+  overflow-y: auto;
+  overflow-x: auto;
 }
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: #f9fafb; }

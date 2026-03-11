@@ -111,10 +111,10 @@ export function buildGenericTable(rows) {
     return `<tr>${cells}</tr>`;
   }).join('');
 
-  return `<table class="data-table">
+  return `<div class="table-scroll-wrap"><table class="data-table">
     <thead><tr>${headerCells}</tr></thead>
     <tbody>${bodyRows}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 /** Escape HTML special characters. */
@@ -191,7 +191,7 @@ export function buildInteractiveTable(container, rows) {
 
   // ---- Table ----
   const tableWrap = document.createElement('div');
-  tableWrap.style.overflowX = 'auto';
+  tableWrap.className = 'table-scroll-wrap';
 
   const table = document.createElement('table');
   table.className = 'data-table';
