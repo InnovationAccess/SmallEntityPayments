@@ -7,21 +7,34 @@
 
 import { apiGet, setLoading, showStatus, escHtml } from './app.js';
 
-const searchInput  = document.getElementById('cite-search-input');
-const searchBtn    = document.getElementById('cite-search-btn');
-const summaryCard  = document.getElementById('cite-summary');
-const patentLabel  = document.getElementById('cite-patent-label');
-const totalEl      = document.getElementById('cite-total');
-const examinerEl   = document.getElementById('cite-examiner');
-const applicantEl  = document.getElementById('cite-applicant');
-const rangeEl      = document.getElementById('cite-range');
-const uniqExamEl   = document.getElementById('cite-unique-examiners');
-const uniqApplEl   = document.getElementById('cite-unique-applicants');
-const byYearEl     = document.getElementById('cite-by-year');
-const resultsArea  = document.getElementById('cite-results');
-const resultsCount = document.getElementById('cite-results-count');
-const tableBody    = document.getElementById('cite-table-body');
-const statusEl     = document.getElementById('cite-status');
+const searchInput   = document.getElementById('cite-search-input');
+const searchBtn     = document.getElementById('cite-search-btn');
+const summaryCard   = document.getElementById('cite-summary');
+const patentLabel   = document.getElementById('cite-patent-label');
+const totalEl       = document.getElementById('cite-total');
+const examinerEl    = document.getElementById('cite-examiner');
+const applicantEl   = document.getElementById('cite-applicant');
+const rangeEl       = document.getElementById('cite-range');
+const byYearEl      = document.getElementById('cite-by-year');
+const examListEl    = document.getElementById('cite-examiner-list');
+const applListEl    = document.getElementById('cite-applicant-list');
+const resultsArea   = document.getElementById('cite-results');
+const resultsCount  = document.getElementById('cite-results-count');
+const tableBody     = document.getElementById('cite-table-body');
+const statusEl      = document.getElementById('cite-status');
+
+function renderBreakdownList(container, items) {
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="cite-breakdown-item text-muted">None</div>';
+    return;
+  }
+  container.innerHTML = items.map(it =>
+    `<div class="cite-breakdown-item">
+      <span class="cite-breakdown-name" title="${escHtml(it.name)}">${escHtml(it.name)}</span>
+      <span class="cite-breakdown-count">${it.count}</span>
+    </div>`
+  ).join('');
+}
 
 async function doSearch() {
   const raw = searchInput.value.trim();
@@ -38,14 +51,11 @@ async function doSearch() {
       apiGet(`/api/forward-citations/${encodeURIComponent(raw)}?limit=2000`),
     ]);
 
-    // Show summary
+    // Show summary KPIs
     patentLabel.textContent = summary.cited_patent_number;
     totalEl.textContent = summary.total_citations.toLocaleString();
     examinerEl.textContent = (summary.by_category?.examiner ?? 0).toLocaleString();
     applicantEl.textContent = (summary.by_category?.applicant ?? 0).toLocaleString();
-
-    uniqExamEl.textContent = (summary.unique_examiners ?? 0).toLocaleString();
-    uniqApplEl.textContent = (summary.unique_applicants ?? 0).toLocaleString();
 
     if (summary.earliest_citing_date && summary.latest_citing_date) {
       rangeEl.textContent =
@@ -73,6 +83,10 @@ async function doSearch() {
     } else {
       byYearEl.innerHTML = '';
     }
+
+    // Examiner and applicant breakdown lists
+    renderBreakdownList(examListEl, summary.by_examiner || []);
+    renderBreakdownList(applListEl, summary.by_applicant || []);
 
     summaryCard.classList.remove('hidden');
 

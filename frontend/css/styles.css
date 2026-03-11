@@ -606,6 +606,55 @@ textarea { resize: vertical; }
   text-orientation: mixed;
 }
 
+/* Examiner / Applicant breakdown lists */
+.cite-breakdown-row {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+.cite-breakdown-col {
+  flex: 1;
+  min-width: 0;
+}
+.cite-breakdown-title {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: .5rem;
+}
+.cite-breakdown-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+}
+.cite-breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .35rem .75rem;
+  font-size: .82rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.cite-breakdown-item:last-child { border-bottom: none; }
+.cite-breakdown-item:hover { background: #fff; }
+.cite-breakdown-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: .5rem;
+}
+.cite-breakdown-count {
+  font-weight: 700;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .cite-breakdown-row { flex-direction: column; }
+}
+
 /* Citation category badges */
 .cite-cat {
   display: inline-block;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=3" />
 </head>
 <body>
 
@@ -187,16 +187,18 @@
             <span class="cite-stat-value" id="cite-range">-</span>
             <span class="cite-stat-label">Date Range</span>
           </div>
-          <div class="cite-stat">
-            <span class="cite-stat-value" id="cite-unique-examiners">0</span>
-            <span class="cite-stat-label">Unique Examiners</span>
-          </div>
-          <div class="cite-stat">
-            <span class="cite-stat-value" id="cite-unique-applicants">0</span>
-            <span class="cite-stat-label">Unique Applicants</span>
-          </div>
         </div>
         <div id="cite-by-year" class="cite-by-year"></div>
+        <div class="cite-breakdown-row">
+          <div class="cite-breakdown-col">
+            <h4 class="cite-breakdown-title">Citing Examiners</h4>
+            <div id="cite-examiner-list" class="cite-breakdown-list"></div>
+          </div>
+          <div class="cite-breakdown-col">
+            <h4 class="cite-breakdown-title">Citing Applicants</h4>
+            <div id="cite-applicant-list" class="cite-breakdown-list"></div>
+          </div>
+        </div>
       </div>
 
       <!-- Citation table -->
@@ -340,7 +342,7 @@
   <script src="/static/js/mdm.js?v=7"           type="module"></script>
   <script src="/static/js/query_builder.js?v=7" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=7"  type="module"></script>
-  <script src="/static/js/citations.js?v=1"    type="module"></script>
+  <script src="/static/js/citations.js?v=2"    type="module"></script>
   <script src="/static/js/etl_log.js?v=1"    type="module"></script>
 </body>
 </html>

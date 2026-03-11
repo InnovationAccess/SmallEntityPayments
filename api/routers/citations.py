@@ -131,8 +131,8 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
             "by_year": {},
             "earliest_citing_date": None,
             "latest_citing_date": None,
-            "unique_examiners": 0,
-            "unique_applicants": 0,
+            "by_examiner": [],
+            "by_applicant": [],
         }
 
     total_row = total_result[0]
@@ -159,20 +159,41 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
     year_rows = bq_service.run_query(year_sql, params)
     by_year = {int(row["year"]): row["count"] for row in year_rows}
 
-    # Unique examiners and unique normalized applicants
-    uniq_sql = f"""
+    # Examiner breakdown: each examiner and how many times they cited
+    exam_sql = f"""
+    SELECT pfw.examiner_name AS name, COUNT(*) AS count
+    FROM `{settings.forward_citations_table}` fc
+    LEFT JOIN `{settings.patent_table}` pfw
+      ON pfw.patent_number = fc.citing_patent_number
+    WHERE fc.cited_patent_number = @patent_number
+      AND pfw.examiner_name IS NOT NULL
+    GROUP BY pfw.examiner_name
+    ORDER BY count DESC
+    """
+    exam_rows = bq_service.run_query(exam_sql, params)
+    by_examiner = [
+        {"name": r["name"], "count": r["count"]} for r in exam_rows
+    ]
+
+    # Applicant breakdown: each normalized applicant and how many times they cited
+    appl_sql = f"""
     SELECT
-      COUNT(DISTINCT pfw.examiner_name) AS unique_examiners,
-      COUNT(DISTINCT COALESCE(nu.representative_name, pfw.first_applicant_name)) AS unique_applicants
+      COALESCE(nu.representative_name, pfw.first_applicant_name) AS name,
+      COUNT(*) AS count
     FROM `{settings.forward_citations_table}` fc
     LEFT JOIN `{settings.patent_table}` pfw
       ON pfw.patent_number = fc.citing_patent_number
     LEFT JOIN `{settings.unification_table}` nu
       ON nu.associated_name = pfw.first_applicant_name
     WHERE fc.cited_patent_number = @patent_number
+      AND pfw.first_applicant_name IS NOT NULL
+    GROUP BY name
+    ORDER BY count DESC
     """
-    uniq_result = bq_service.run_query(uniq_sql, params)
-    uniq_row = uniq_result[0] if uniq_result else {}
+    appl_rows = bq_service.run_query(appl_sql, params)
+    by_applicant = [
+        {"name": r["name"], "count": r["count"]} for r in appl_rows
+    ]
 
     return {
         "cited_patent_number": normalized,
@@ -189,6 +210,6 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
             if hasattr(total_row.get("latest_citing_date"), "isoformat")
             else total_row.get("latest_citing_date")
         ),
-        "unique_examiners": uniq_row.get("unique_examiners", 0),
-        "unique_applicants": uniq_row.get("unique_applicants", 0),
+        "by_examiner": by_examiner,
+        "by_applicant": by_applicant,
     }
