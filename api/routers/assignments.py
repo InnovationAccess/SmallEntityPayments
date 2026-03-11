@@ -44,7 +44,8 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
       assignor_name,
       conveyance_text,
       assignee_name,
-      reel_frame
+      reel_frame,
+      recorded_date
     FROM (
       SELECT
         assignor_execution_date,
@@ -52,6 +53,7 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
         conveyance_text,
         assignee_name,
         reel_frame,
+        recorded_date,
         ROW_NUMBER() OVER (
           PARTITION BY reel_frame, assignor_name, assignee_name
           ORDER BY recorded_date DESC
