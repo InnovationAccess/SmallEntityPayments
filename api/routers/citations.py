@@ -45,11 +45,13 @@ def get_forward_citations(patent_number: str, limit: int = 500) -> Dict[str, Any
       fc.citation_category,
       fc.citing_kind_code,
       pfw.invention_title AS citing_invention_title,
-      pfw.first_applicant_name AS citing_applicant_name,
+      COALESCE(nu.representative_name, pfw.first_applicant_name) AS citing_applicant_name,
       pfw.examiner_name AS citing_examiner_name
     FROM `{settings.forward_citations_table}` fc
     LEFT JOIN `{settings.patent_table}` pfw
       ON pfw.patent_number = fc.citing_patent_number
+    LEFT JOIN `{settings.unification_table}` nu
+      ON nu.associated_name = pfw.first_applicant_name
     WHERE fc.cited_patent_number = @patent_number
     ORDER BY fc.citing_grant_date DESC
     LIMIT @limit
@@ -129,6 +131,8 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
             "by_year": {},
             "earliest_citing_date": None,
             "latest_citing_date": None,
+            "unique_examiners": 0,
+            "unique_applicants": 0,
         }
 
     total_row = total_result[0]
@@ -155,6 +159,21 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
     year_rows = bq_service.run_query(year_sql, params)
     by_year = {int(row["year"]): row["count"] for row in year_rows}
 
+    # Unique examiners and unique normalized applicants
+    uniq_sql = f"""
+    SELECT
+      COUNT(DISTINCT pfw.examiner_name) AS unique_examiners,
+      COUNT(DISTINCT COALESCE(nu.representative_name, pfw.first_applicant_name)) AS unique_applicants
+    FROM `{settings.forward_citations_table}` fc
+    LEFT JOIN `{settings.patent_table}` pfw
+      ON pfw.patent_number = fc.citing_patent_number
+    LEFT JOIN `{settings.unification_table}` nu
+      ON nu.associated_name = pfw.first_applicant_name
+    WHERE fc.cited_patent_number = @patent_number
+    """
+    uniq_result = bq_service.run_query(uniq_sql, params)
+    uniq_row = uniq_result[0] if uniq_result else {}
+
     return {
         "cited_patent_number": normalized,
         "total_citations": total_row["total_citations"],
@@ -170,4 +189,6 @@ def get_citation_summary(patent_number: str) -> Dict[str, Any]:
             if hasattr(total_row.get("latest_citing_date"), "isoformat")
             else total_row.get("latest_citing_date")
         ),
+        "unique_examiners": uniq_row.get("unique_examiners", 0),
+        "unique_applicants": uniq_row.get("unique_applicants", 0),
     }

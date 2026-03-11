@@ -15,6 +15,8 @@ const totalEl      = document.getElementById('cite-total');
 const examinerEl   = document.getElementById('cite-examiner');
 const applicantEl  = document.getElementById('cite-applicant');
 const rangeEl      = document.getElementById('cite-range');
+const uniqExamEl   = document.getElementById('cite-unique-examiners');
+const uniqApplEl   = document.getElementById('cite-unique-applicants');
 const byYearEl     = document.getElementById('cite-by-year');
 const resultsArea  = document.getElementById('cite-results');
 const resultsCount = document.getElementById('cite-results-count');
@@ -41,6 +43,9 @@ async function doSearch() {
     totalEl.textContent = summary.total_citations.toLocaleString();
     examinerEl.textContent = (summary.by_category?.examiner ?? 0).toLocaleString();
     applicantEl.textContent = (summary.by_category?.applicant ?? 0).toLocaleString();
+
+    uniqExamEl.textContent = (summary.unique_examiners ?? 0).toLocaleString();
+    uniqApplEl.textContent = (summary.unique_applicants ?? 0).toLocaleString();
 
     if (summary.earliest_citing_date && summary.latest_citing_date) {
       rangeEl.textContent =
