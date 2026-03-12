@@ -22,8 +22,8 @@ router = APIRouter(prefix="/api/assignments", tags=["Assignments"])
 def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
     """Get the chain of assignments for a patent, sorted by execution date.
 
-    Deduplicates by (reel_frame, assignor_name, assignee_name) and returns
-    the assignment history from earliest to latest.
+    Resolves the input (patent_number or application_number) to
+    application_number(s), then queries the normalized assignment tables.
     """
     normalized = normalize_patent_number(patent_number)
     if not normalized:
@@ -35,34 +35,30 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
     from google.cloud import bigquery
 
     params = [
-        bigquery.ScalarQueryParameter("patent_number", "STRING", normalized),
+        bigquery.ScalarQueryParameter("id", "STRING", normalized),
     ]
 
+    # Resolve input to application_number(s) via documents table,
+    # then join through reel_frame to get assignment details.
     sql = f"""
-    SELECT
-      assignor_execution_date,
-      assignor_name,
-      conveyance_text,
-      assignee_name,
-      reel_frame,
-      recorded_date
-    FROM (
-      SELECT
-        assignor_execution_date,
-        assignor_name,
-        conveyance_text,
-        assignee_name,
-        reel_frame,
-        recorded_date,
-        ROW_NUMBER() OVER (
-          PARTITION BY reel_frame, assignor_name, assignee_name
-          ORDER BY recorded_date DESC
-        ) AS rn
-      FROM `{settings.assignments_table}`
-      WHERE patent_number = @patent_number OR application_number = @patent_number
+    WITH matching_docs AS (
+      SELECT DISTINCT reel_frame
+      FROM `{settings.assign_documents_table}`
+      WHERE application_number = @id
+         OR patent_number = @id
     )
-    WHERE rn = 1
-    ORDER BY assignor_execution_date ASC, recorded_date ASC
+    SELECT
+      ao.assignor_execution_date,
+      ao.assignor_name,
+      ar.conveyance_text,
+      ae.assignee_name,
+      ar.reel_frame,
+      ar.recorded_date
+    FROM matching_docs md
+    JOIN `{settings.assign_records_table}` ar ON ar.reel_frame = md.reel_frame
+    LEFT JOIN `{settings.assign_assignors_table}` ao ON ao.reel_frame = md.reel_frame
+    LEFT JOIN `{settings.assign_assignees_table}` ae ON ae.reel_frame = md.reel_frame
+    ORDER BY ao.assignor_execution_date ASC, ar.recorded_date ASC
     LIMIT 200
     """
 

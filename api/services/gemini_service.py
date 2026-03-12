@@ -14,7 +14,7 @@ from api.config import settings
 # the available tables and columns.
 _SCHEMA_CONTEXT = """
 You have access to a Google BigQuery dataset called `uspto_data` with the following tables.
-All tables use a FLAT (denormalized) schema — there are NO nested ARRAY or STRUCT columns.
+All tables use a FLAT schema — there are NO nested ARRAY or STRUCT columns.
 
 Table: patent_file_wrapper_v2
   - application_number       STRING NOT NULL  (USPTO application number, primary key)
@@ -39,31 +39,44 @@ Table: patent_file_wrapper_v2
   - national_stage_indicator BOOLEAN
   - first_inventor_to_file   BOOLEAN
 
-Table: patent_assignments_v3
-  - reel_frame               STRING NOT NULL  (reel/frame number, e.g. "12345/0001")
-  - recorded_date            DATE NOT NULL     (partitioned by this column)
+--- PATENT ASSIGNMENTS (4 normalized tables linked by reel_frame) ---
+
+Table: pat_assign_records  (one row per assignment transaction)
+  - reel_frame               STRING NOT NULL  (e.g. "12345/1")
+  - recorded_date            DATE NOT NULL     (partitioned by MONTH)
   - last_update_date         DATE
-  - conveyance_text          STRING           (raw text, e.g. "ASSIGNMENT OF ASSIGNORS INTEREST")
-  - conveyance_type          STRING           (classified: ASSIGNMENT, SECURITY_INTEREST, MERGER, RELEASE, LICENSE, GOVERNMENT_INTEREST, CORRECTION, OTHER)
-  - assignor_name            STRING           (entity transferring rights)
+  - conveyance_text          STRING           (raw text)
+  - conveyance_type          STRING           (ASSIGNMENT, SECURITY_INTEREST, MERGER, RELEASE, LICENSE, GOVERNMENT_INTEREST, CORRECTION, OTHER)
+  - page_count               INT64
+  - correspondent_name       STRING
+  - employer_assignment      BOOLEAN          (NULL for now)
+
+Table: pat_assign_assignors  (one row per assignor per assignment)
+  - reel_frame               STRING NOT NULL
+  - assignor_name            STRING
   - assignor_execution_date  DATE
-  - assignee_name            STRING           (entity receiving rights)
+
+Table: pat_assign_assignees  (one row per assignee per assignment)
+  - reel_frame               STRING NOT NULL
+  - assignee_name            STRING
   - assignee_address_1       STRING
   - assignee_address_2       STRING
   - assignee_city            STRING
   - assignee_state           STRING
   - assignee_postcode        STRING
   - assignee_country         STRING
-  - correspondent_name       STRING
-  - application_number       STRING           (USPTO application number, e.g. "15123456")
+
+Table: pat_assign_documents  (one row per patent property per assignment)
+  - reel_frame               STRING NOT NULL
+  - application_number       STRING           (USPTO application number)
   - filing_date              DATE
-  - publication_number       STRING           (pre-grant publication number)
+  - publication_number       STRING           (pre-grant publication number, can be NULL)
   - publication_date         DATE
-  - patent_number            STRING           (granted patent number, e.g. "10123456")
+  - patent_number            STRING           (granted patent number, can be NULL for pending)
   - grant_date               DATE
   - invention_title          STRING
-  - page_count               INT64
-  - employer_assignment      BOOLEAN          (NULL for now — future use)
+
+--- OTHER TABLES ---
 
 Table: maintenance_fee_events_v2
   - patent_number            STRING NOT NULL
@@ -92,9 +105,9 @@ Table: pfw_continuity
   - parent_status_description STRING
 
 Table: forward_citations
-  - citing_patent_number     STRING NOT NULL   (the patent that cites another)
+  - citing_patent_number     STRING NOT NULL
   - citing_grant_date        DATE
-  - cited_patent_number      STRING NOT NULL   (the patent being cited)
+  - cited_patent_number      STRING NOT NULL
   - citation_category        STRING
 
 Table: name_unification
@@ -107,63 +120,63 @@ Table: entity_names
 
 BIGQUERY SQL RULES (you MUST follow these — violations cause query failures):
 1. NEVER write `SELECT expression WHERE condition` without a FROM clause.
-   BigQuery requires FROM before WHERE.
-2. Do NOT use correlated subqueries that reference other CTEs or tables.
-   Use JOINs instead.
+2. Do NOT use correlated subqueries. Use JOINs instead.
 3. Do NOT end queries with a semicolon.
-4. There are NO ARRAY columns in any table — do NOT use UNNEST anywhere.
-   All columns are scalar (flat). Just use direct column references.
-5. ARRAY_AGG syntax: the OFFSET accessor goes OUTSIDE the function call:
-     ARRAY_AGG(expr ORDER BY col DESC LIMIT 1)[OFFSET(0)]
-6. When using CASE expressions inside aggregate functions, make sure each
-   SELECT has a FROM clause.
+4. There are NO ARRAY columns — do NOT use UNNEST anywhere.
+5. ARRAY_AGG syntax: ARRAY_AGG(expr ORDER BY col DESC LIMIT 1)[OFFSET(0)]
+6. Make sure each SELECT has a FROM clause.
 
-COMPREHENSIVE RESULTS RULE (IMPORTANT):
-Always produce rich, comprehensive results by JOINing related tables:
-- patent_file_wrapper_v2 joins to patent_assignments_v3 ON pfw.patent_number = a.patent_number
-- patent_file_wrapper_v2 joins to maintenance_fee_events_v2 ON patent_number
-- patent_file_wrapper_v2 joins to pfw_transactions ON application_number
-- patent_file_wrapper_v2 joins to pfw_continuity ON application_number
+CROSS-TABLE JOIN STRATEGY — application_number IS THE UNIVERSAL KEY:
+Every patent asset has an application_number, but only granted patents have a
+patent_number and only published apps have a publication_number. Therefore:
+- ALL cross-table joins MUST use application_number (not patent_number)
+- This ensures pending applications are never silently dropped from results
+
+Join patterns:
+- patent_file_wrapper_v2 ↔ pat_assign_documents ON application_number
+- patent_file_wrapper_v2 ↔ maintenance_fee_events_v2 ON application_number
+- patent_file_wrapper_v2 ↔ pfw_transactions ON application_number
+- patent_file_wrapper_v2 ↔ pfw_continuity ON application_number
+- pat_assign_documents ↔ pat_assign_records ON reel_frame
+- pat_assign_documents ↔ pat_assign_assignees ON reel_frame
+- pat_assign_documents ↔ pat_assign_assignors ON reel_frame
 - forward_citations joins ON cited_patent_number or citing_patent_number
 
-When a query involves any table, JOIN related tables to include useful columns:
+PATENT NUMBER / PUBLICATION NUMBER RESOLUTION:
+When a user asks about a specific patent_number or publication_number:
+1. First resolve to application_number:
+   SELECT application_number FROM `uspto_data.pat_assign_documents`
+   WHERE patent_number = '10123456'
+   -- or use patent_file_wrapper_v2 for patent_number → application_number
+2. Do the analysis using application_number as the join key
+3. Include patent_number and/or publication_number in the output for display
+
+COMPREHENSIVE RESULTS — always JOIN related tables:
 - patent_file_wrapper_v2: invention_title, grant_date, first_applicant_name, entity_status
-- patent_assignments_v3: assignee_name, assignee_city, assignee_state, recorded_date, conveyance_type
+- Assignment tables: assignee_name, assignee_city, recorded_date, conveyance_type
 - maintenance_fee_events_v2: event_code, event_date, entity_status
 - forward_citations: citing_patent_number, citing_grant_date
 
-Use LEFT JOINs so rows are not lost when a patent exists in one table but not another.
+Use LEFT JOINs so rows are not lost.
 
-Recommended pattern for getting applicant/assignee names alongside other data:
-  WITH applicant_info AS (
-    SELECT pfw.patent_number, pfw.invention_title, pfw.grant_date,
-      pfw.first_applicant_name AS applicant_name
-    FROM `uspto_data.patent_file_wrapper_v2` pfw
-    WHERE pfw.first_applicant_name IS NOT NULL
-  ),
-  recent_assignees AS (
-    SELECT pa.patent_number,
-      ARRAY_AGG(pa.assignee_name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)]
+Recommended pattern for getting recent assignee alongside other data:
+  WITH recent_assignees AS (
+    SELECT ad.application_number,
+      ARRAY_AGG(ae.assignee_name ORDER BY ar.recorded_date DESC LIMIT 1)[OFFSET(0)]
         AS recent_assignee_name
-    FROM `uspto_data.patent_assignments_v3` pa
-    WHERE pa.assignee_name IS NOT NULL AND pa.patent_number IS NOT NULL
-    GROUP BY pa.patent_number
+    FROM `uspto_data.pat_assign_documents` ad
+    JOIN `uspto_data.pat_assign_records` ar ON ar.reel_frame = ad.reel_frame
+    JOIN `uspto_data.pat_assign_assignees` ae ON ae.reel_frame = ad.reel_frame
+    WHERE ae.assignee_name IS NOT NULL AND ad.application_number IS NOT NULL
+    GROUP BY ad.application_number
   )
-Then LEFT JOIN these CTEs to your main query on patent_number.
+Then LEFT JOIN on application_number.
 
-INCLUDE ALL RELEVANT COLUMNS: When querying a table, include ALL its useful columns
-in the SELECT, not just the ones mentioned in the filter.
+INCLUDE ALL RELEVANT COLUMNS in the SELECT, not just filtered ones.
 
-When you need entity name frequency counts or want to list/search entities, prefer
-the entity_names table. Use the raw tables only when you need address details or
-patent-level data.
+Entity names are stored in UPPERCASE. Use case-insensitive matching.
 
-IMPORTANT: Entity names in the data are stored in UPPERCASE. Always use case-insensitive
-matching (UPPER or LOWER) when filtering by entity name.
-
-When filtering by entity name (applicant or assignee), use the name_unification
-table to expand the search:
-
+When filtering by entity name, use name_unification to expand:
   WITH name_variants AS (
     SELECT nu2.associated_name
     FROM `uspto_data.name_unification` nu1
@@ -171,34 +184,12 @@ table to expand the search:
       ON nu2.representative_name = nu1.representative_name
     WHERE LOWER(nu1.associated_name) = LOWER('Entity Name')
   )
-
-Then use: WHERE pfw.first_applicant_name IN (SELECT associated_name FROM name_variants)
-Or for assignments: WHERE pa.assignee_name IN (SELECT associated_name FROM name_variants)
-
-IMPORTANT — patent_assignments_v3 has SEPARATE document ID fields:
-- application_number: the USPTO application number (e.g. "15123456")
-- publication_number: the pre-grant publication number (can be NULL)
-- patent_number: the granted patent number (can be NULL for pending apps)
-When joining to patent_file_wrapper_v2, ALWAYS use patent_number (not application_number)
-unless the query specifically asks about applications.
-When a row has patent_number IS NULL, it means the application has not yet been granted.
+Then: WHERE column IN (SELECT associated_name FROM name_variants)
 
 If no unification exists, fall back to case-insensitive matching:
-  WHERE LOWER(pfw.first_applicant_name) = LOWER('Entity Name')
-
-Use a LEFT JOIN pattern to handle both cases:
-
-  WITH name_variants AS (
-    SELECT nu2.associated_name
-    FROM `uspto_data.name_unification` nu1
-    JOIN `uspto_data.name_unification` nu2
-      ON nu2.representative_name = nu1.representative_name
-    WHERE LOWER(nu1.associated_name) = LOWER('Entity Name')
-  )
-  ...
-  WHERE pfw.first_applicant_name IN (SELECT associated_name FROM name_variants)
+  WHERE column IN (SELECT associated_name FROM name_variants)
      OR (NOT EXISTS (SELECT 1 FROM name_variants)
-         AND LOWER(pfw.first_applicant_name) = LOWER('Entity Name'))
+         AND LOWER(column) = LOWER('Entity Name'))
 """
 
 _SYSTEM_PROMPT = (

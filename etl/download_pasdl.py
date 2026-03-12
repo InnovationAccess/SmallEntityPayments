@@ -29,7 +29,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from etl.parse_assignments_xml_v3 import parse_input
+from etl.parse_assignments_xml_v4 import parse_input
 
 API_BASE = "https://api.uspto.gov"
 PRODUCT_ID = "PASDL"
@@ -123,15 +123,17 @@ def process_all(output_dir: str, min_year: int = 2006, recent: int | None = None
                 print(f"  FAILED to download {filename}", file=sys.stderr)
                 continue
 
-            intermediate = os.path.join(output_dir, f"pasdl_{filename}.jsonl.gz")
-            count, skp = parse_input(tmp_path, intermediate, min_year)
-            total_rows += count
+            parse_dir = os.path.join(output_dir, f"pasdl_{filename}")
+            counts = parse_input(tmp_path, parse_dir, min_year)
+            total = sum(counts.values())
+            total_rows += total
             processed += 1
 
             with open(marker, "w") as m:
-                m.write(f"{count}\n")
+                m.write(f"{total}\n")
 
-            print(f"  Done: {count:,} rows", file=sys.stderr)
+            print(f"  Done: {counts['records']:,} records, {counts['documents']:,} documents",
+                  file=sys.stderr)
         except Exception as e:
             print(f"  ERROR processing {filename}: {e}", file=sys.stderr)
         finally:

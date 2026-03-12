@@ -17,7 +17,24 @@ class Settings:
 
     @property
     def assignments_table(self) -> str:
+        """Kept for rollback — points to the old flat v3 table."""
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments_v3"
+
+    @property
+    def assign_records_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pat_assign_records"
+
+    @property
+    def assign_assignors_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pat_assign_assignors"
+
+    @property
+    def assign_assignees_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pat_assign_assignees"
+
+    @property
+    def assign_documents_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pat_assign_documents"
 
     @property
     def maintenance_table(self) -> str:

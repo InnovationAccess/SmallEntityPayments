@@ -186,8 +186,7 @@ class BigQueryService:
     def get_addresses(self, name: str) -> List[Dict[str, Any]]:
         """Return unique addresses for an entity name from assignment records.
 
-        v2 schema: patent_assignments_v2 has flat assignee address columns.
-        patent_file_wrapper_v2 does not have address fields.
+        Uses the normalized pat_assign_assignees table.
         """
         names = self._get_all_names_for(name)
 
@@ -197,7 +196,7 @@ class BigQueryService:
         sql = f"""
         SELECT DISTINCT assignee_city AS city, assignee_state AS state,
                assignee_country AS country
-        FROM `{settings.assignments_table}`
+        FROM `{settings.assign_assignees_table}`
         WHERE assignee_name IN ({in_clause})
           AND (assignee_city IS NOT NULL OR assignee_state IS NOT NULL)
         ORDER BY assignee_city, assignee_state
@@ -211,7 +210,7 @@ class BigQueryService:
     ) -> List[Dict[str, Any]]:
         """Find entity names at given addresses from assignment records.
 
-        v2 schema: uses flat assignee_city/assignee_state columns.
+        Uses the normalized pat_assign_assignees table.
         """
         if not addresses:
             return []
@@ -250,7 +249,7 @@ class BigQueryService:
         sql = f"""
         WITH addr_names AS (
           SELECT DISTINCT assignee_name AS entity_name
-          FROM `{settings.assignments_table}`
+          FROM `{settings.assign_assignees_table}`
           WHERE ({addr_where}) AND assignee_name IS NOT NULL
         )
         SELECT

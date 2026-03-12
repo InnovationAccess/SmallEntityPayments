@@ -9,7 +9,7 @@ Usage:
 
 Sources:
     ptblxml   - Weekly patent grant citations (forward_citations table)
-    pasdl     - Daily patent assignment updates (patent_assignments_v3 table)
+    pasdl     - Daily patent assignment updates (4 normalized tables)
     ptmnfee2  - Maintenance fee events (maintenance_fee_events_v2 table)
     ptfwpre   - Patent file wrapper (patent_file_wrapper_v2, pfw_transactions, pfw_continuity)
     entity    - Rebuild entity_names from current data (no download needed)
@@ -206,9 +206,17 @@ def update_ptblxml(work_dir: str) -> dict:
 # ─── PASDL: Daily Assignment Updates ─────────────────────────────
 
 def update_pasdl(work_dir: str) -> dict:
-    """Download new PASDL daily files and load assignments."""
+    """Download new PASDL daily files and load into 4 normalized assignment tables."""
     from etl.download_pasdl import get_api_key, list_files, download_file
-    from etl.parse_assignments_xml_v3 import parse_input
+    from etl.parse_assignments_xml_v4 import parse_input
+
+    # Mapping from parser output file prefixes to BQ table names
+    TABLE_MAP = {
+        "records": "pat_assign_records",
+        "assignors": "pat_assign_assignors",
+        "assignees": "pat_assign_assignees",
+        "documents": "pat_assign_documents",
+    }
 
     stats = {"processed": 0, "skipped": 0, "failed": 0, "rows": 0}
 
@@ -244,15 +252,38 @@ def update_pasdl(work_dir: str) -> dict:
                 stats["failed"] += 1
                 continue
 
-            jsonl_path = os.path.join(work_dir, f"pasdl_{filename}.jsonl.gz")
-            count, _ = parse_input(tmp_path, jsonl_path, min_year=2006)
-            print(f"  Parsed {count:,} assignment rows", file=sys.stderr)
+            parse_dir = os.path.join(work_dir, f"pasdl_{filename}")
+            counts = parse_input(tmp_path, parse_dir, min_year=2006)
+            total = sum(counts.values())
+            print(f"  Parsed {counts['records']:,} records, {counts['documents']:,} documents",
+                  file=sys.stderr)
 
-            if count > 0 and upload_and_load(jsonl_path, "v3/pasdl", "patent_assignments_v3"):
+            if counts["records"] == 0:
+                print(f"  No records — skipping upload", file=sys.stderr)
                 with open(os.path.join(done_dir, filename + ".done"), "w") as m:
-                    m.write(f"{count}\n")
+                    m.write("0\n")
+                continue
+
+            # Upload and load each of the 4 output files
+            import glob as glob_mod
+            basename = Path(tmp_path).stem
+            all_ok = True
+            for prefix, table in TABLE_MAP.items():
+                # Find the output file matching this prefix
+                pattern = os.path.join(parse_dir, f"{prefix}_*.jsonl.gz")
+                matches = glob_mod.glob(pattern)
+                for jsonl_path in matches:
+                    if not upload_and_load(jsonl_path, "v4/pasdl", table):
+                        all_ok = False
+                        break
+                if not all_ok:
+                    break
+
+            if all_ok:
+                with open(os.path.join(done_dir, filename + ".done"), "w") as m:
+                    m.write(f"{total}\n")
                 stats["processed"] += 1
-                stats["rows"] += count
+                stats["rows"] += total
                 print(f"  Loaded successfully", file=sys.stderr)
             else:
                 stats["failed"] += 1
@@ -461,11 +492,11 @@ def rebuild_entity_names():
         AND first_inventor_name != first_applicant_name
       UNION ALL
       SELECT assignee_name AS entity_name
-      FROM `{BQ_DATASET}.patent_assignments_v3`
+      FROM `{BQ_DATASET}.pat_assign_assignees`
       WHERE assignee_name IS NOT NULL
       UNION ALL
       SELECT assignor_name AS entity_name
-      FROM `{BQ_DATASET}.patent_assignments_v3`
+      FROM `{BQ_DATASET}.pat_assign_assignors`
       WHERE assignor_name IS NOT NULL
     )
     SELECT entity_name, COUNT(*) AS frequency
