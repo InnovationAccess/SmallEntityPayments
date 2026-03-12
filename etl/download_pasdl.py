@@ -29,7 +29,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from etl.parse_assignments_xml_v2 import parse_input
+from etl.parse_assignments_xml_v3 import parse_input
 
 API_BASE = "https://api.uspto.gov"
 PRODUCT_ID = "PASDL"

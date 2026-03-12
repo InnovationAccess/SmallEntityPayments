@@ -9,7 +9,7 @@ Usage:
 
 Sources:
     ptblxml   - Weekly patent grant citations (forward_citations table)
-    pasdl     - Daily patent assignment updates (patent_assignments_v2 table)
+    pasdl     - Daily patent assignment updates (patent_assignments_v3 table)
     ptmnfee2  - Maintenance fee events (maintenance_fee_events_v2 table)
     ptfwpre   - Patent file wrapper (patent_file_wrapper_v2, pfw_transactions, pfw_continuity)
     entity    - Rebuild entity_names from current data (no download needed)
@@ -208,7 +208,7 @@ def update_ptblxml(work_dir: str) -> dict:
 def update_pasdl(work_dir: str) -> dict:
     """Download new PASDL daily files and load assignments."""
     from etl.download_pasdl import get_api_key, list_files, download_file
-    from etl.parse_assignments_xml_v2 import parse_input
+    from etl.parse_assignments_xml_v3 import parse_input
 
     stats = {"processed": 0, "skipped": 0, "failed": 0, "rows": 0}
 
@@ -248,7 +248,7 @@ def update_pasdl(work_dir: str) -> dict:
             count, _ = parse_input(tmp_path, jsonl_path, min_year=2006)
             print(f"  Parsed {count:,} assignment rows", file=sys.stderr)
 
-            if count > 0 and upload_and_load(jsonl_path, "v2/pasdl", "patent_assignments_v2"):
+            if count > 0 and upload_and_load(jsonl_path, "v3/pasdl", "patent_assignments_v3"):
                 with open(os.path.join(done_dir, filename + ".done"), "w") as m:
                     m.write(f"{count}\n")
                 stats["processed"] += 1
@@ -461,11 +461,11 @@ def rebuild_entity_names():
         AND first_inventor_name != first_applicant_name
       UNION ALL
       SELECT assignee_name AS entity_name
-      FROM `{BQ_DATASET}.patent_assignments_v2`
+      FROM `{BQ_DATASET}.patent_assignments_v3`
       WHERE assignee_name IS NOT NULL
       UNION ALL
       SELECT assignor_name AS entity_name
-      FROM `{BQ_DATASET}.patent_assignments_v2`
+      FROM `{BQ_DATASET}.patent_assignments_v3`
       WHERE assignor_name IS NOT NULL
     )
     SELECT entity_name, COUNT(*) AS frequency
