@@ -56,5 +56,5 @@ CREATE TABLE IF NOT EXISTS `uspto_data.patent_assignments_v3` (
   source_file              STRING,
   ingestion_timestamp      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
-PARTITION BY recorded_date
+PARTITION BY DATE_TRUNC(recorded_date, MONTH)
 CLUSTER BY patent_number, application_number;
