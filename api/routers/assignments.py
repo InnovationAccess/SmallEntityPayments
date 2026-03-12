@@ -59,7 +59,7 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
           ORDER BY recorded_date DESC
         ) AS rn
       FROM `{settings.assignments_table}`
-      WHERE doc_number = @patent_number
+      WHERE patent_number = @patent_number OR application_number = @patent_number
     )
     WHERE rn = 1
     ORDER BY assignor_execution_date ASC, recorded_date ASC

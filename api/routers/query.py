@@ -34,14 +34,18 @@ _TABLE_FIELDS: Dict[str, Dict[str, str]] = {
         "application_status": "p.application_status",
     },
     "patent_assignments": {
-        "patent_number": "a.doc_number",
+        "patent_number": "a.patent_number",
+        "application_number": "a.application_number",
         "recorded_date": "CAST(a.recorded_date AS STRING)",
+        "filing_date": "CAST(a.filing_date AS STRING)",
+        "grant_date": "CAST(a.grant_date AS STRING)",
         "assignee_name": "a.assignee_name",
         "assignee_city": "a.assignee_city",
         "assignee_state": "a.assignee_state",
         "assignee_country": "a.assignee_country",
         "assignor_name": "a.assignor_name",
         "conveyance_text": "a.conveyance_text",
+        "conveyance_type": "a.conveyance_type",
         "reel_frame": "a.reel_frame",
     },
     "maintenance_fee_events": {
@@ -118,11 +122,11 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
         if "patent_file_wrapper" in tables:
             from_parts.append(
                 f"JOIN `{settings.assignments_table}` AS a "
-                f"ON a.doc_number = p.patent_number AND p.patent_number IS NOT NULL"
+                f"ON a.patent_number = p.patent_number AND p.patent_number IS NOT NULL"
             )
         else:
             from_parts.append(f"`{settings.assignments_table}` AS a")
-            select_parts.extend(["a.doc_number AS patent_number"])
+            select_parts.extend(["a.patent_number"])
         select_parts.extend([
             "CAST(a.recorded_date AS STRING) AS recorded_date",
             "a.assignee_name", "a.assignor_name",
@@ -131,7 +135,7 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
     if "maintenance_fee_events" in tables:
         if from_parts:
             base_alias = "p" if "patent_file_wrapper" in tables else "a"
-            base_col = "patent_number" if base_alias == "p" else "doc_number"
+            base_col = "patent_number"
             from_parts.append(
                 f"JOIN `{settings.maintenance_table}` AS m "
                 f"ON m.patent_number = {base_alias}.{base_col} AND m.patent_number IS NOT NULL"
@@ -226,12 +230,12 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
         AND pfw.first_applicant_name IS NOT NULL
     ),
     recent_assignees AS (
-      SELECT pa.doc_number AS patent_number,
+      SELECT pa.patent_number,
         ARRAY_AGG(pa.assignee_name ORDER BY pa.recorded_date DESC LIMIT 1)[OFFSET(0)] AS recent_assignee_name
       FROM `{settings.assignments_table}` pa
-      WHERE pa.doc_number IN (SELECT patent_number FROM main_results WHERE patent_number IS NOT NULL)
+      WHERE pa.patent_number IN (SELECT patent_number FROM main_results WHERE patent_number IS NOT NULL)
         AND pa.assignee_name IS NOT NULL
-      GROUP BY pa.doc_number
+      GROUP BY pa.patent_number
     )
     SELECT mr.*, an.applicant_name, ra.recent_assignee_name
     FROM main_results mr

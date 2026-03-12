@@ -17,7 +17,7 @@ class Settings:
 
     @property
     def assignments_table(self) -> str:
-        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments_v2"
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_assignments_v3"
 
     @property
     def maintenance_table(self) -> str:
