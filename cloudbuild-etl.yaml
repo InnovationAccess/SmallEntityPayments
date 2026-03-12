@@ -1,0 +1,5 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.etl', '-t', 'us-central1-docker.pkg.dev/uspto-data-app/cloud-run-source-deploy/uspto-etl:latest', '.']
+images:
+  - 'us-central1-docker.pkg.dev/uspto-data-app/cloud-run-source-deploy/uspto-etl:latest'

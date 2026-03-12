@@ -1,7 +1,7 @@
 # SmallEntityPayments — Project Instructions
 
 ## Quick Start
-- Read HANDOFF312.md for full project context, architecture, and current state
+- Read HANDOFF313.md for full project context, architecture, and current state
 - This project lives at: https://github.com/InnovationAccess/SmallEntityPayments
 - GCP Project: uspto-data-app
 - BigQuery Dataset: uspto_data (location: us-west1)
@@ -31,12 +31,15 @@
 - All BigQuery tables use flat/denormalized schemas (no STRUCT/ARRAY except cpc_codes)
 
 ## Current State (2026-03-12)
-- All tables loaded: ~892M rows across 9 tables
-- 4 automated update pipelines running on Cloud Scheduler
+- All tables loaded: ~826M rows across 12 tables (~62.7 GB)
+- Patent assignments normalized into 4 tables (v4): pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents — linked by reel_frame, cross-table joins via application_number
+- Old patent_assignments_v2 and patent_assignments_v3 tables dropped
+- 4 automated update pipelines running on Cloud Scheduler (PASDL uses v4 parser)
 - 5 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Update Log
 - All tables have sticky headers, sortable columns, and assignment chain popup on patent numbers
 - Citation tab includes examiner/applicant breakdown lists with name normalization
 - ETL pipeline logging writes to `etl_log` BigQuery table
+- cloudbuild-etl.yaml checked into repo root (was previously only at /tmp/)
 
 ## Tech Stack
 - Backend: Python/FastAPI on Google Cloud Run
@@ -69,5 +72,5 @@
 
 ## Deployment
 - API: `gcloud run deploy uspto-api --source=. --project=uspto-data-app --region=us-central1 --allow-unauthenticated`
-- ETL: `gcloud builds submit --config=/tmp/cloudbuild-etl.yaml --project=uspto-data-app`
+- ETL: `gcloud builds submit --config=cloudbuild-etl.yaml --project=uspto-data-app`
 - CI/CD: GitHub Actions deploys on push to main (.github/workflows/deploy.yml)
