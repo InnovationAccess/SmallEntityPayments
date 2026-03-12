@@ -829,3 +829,101 @@ textarea { resize: vertical; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* =====================================================================
+   Entity Status Analytics Tab
+   ===================================================================== */
+
+/* Badges for conversion / no-change */
+.es-badge {
+  display: inline-block;
+  padding: .15rem .55rem;
+  border-radius: 9999px;
+  font-size: .75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  vertical-align: middle;
+  margin-left: .5rem;
+}
+.es-badge--changed { background: #fee2e2; color: #991b1b; }
+.es-badge--same    { background: #f3f4f6; color: #6b7280; }
+
+/* Entity status pills (small / micro / large) */
+.es-status-badge {
+  display: inline-block;
+  padding: .12rem .45rem;
+  border-radius: 4px;
+  font-size: .78rem;
+  font-weight: 500;
+}
+.es-status-small { background: #dcfce7; color: #15803d; }
+.es-status-micro { background: #fef9c3; color: #854d0e; }
+.es-status-large { background: #fee2e2; color: #991b1b; }
+.es-status-other { background: #f3f4f6; color: #6b7280; }
+
+/* Patent info block in single-patent view */
+.es-patent-info {
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  margin: .75rem 0;
+  font-size: .9rem;
+}
+
+/* Timeline highlight for conversion event */
+.es-highlight td {
+  background: #fef9c3 !important;
+  font-weight: 600;
+}
+
+/* Entity status distribution bars */
+.es-dist {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin: 1rem 0;
+}
+.es-dist-bar {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+.es-dist-label {
+  width: 70px;
+  font-size: .82rem;
+  font-weight: 600;
+  text-align: right;
+  flex-shrink: 0;
+}
+.es-dist-track {
+  flex: 1;
+  height: 20px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.es-dist-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width .4s ease;
+}
+.es-fill-small { background: #22c55e; }
+.es-fill-micro { background: #eab308; }
+.es-fill-large { background: #ef4444; }
+.es-dist-value {
+  font-size: .78rem;
+  color: var(--color-muted);
+  width: 120px;
+  flex-shrink: 0;
+}
+
+/* Timeline section inside single patent card */
+.es-timeline {
+  margin-top: 1rem;
+}
+.es-timeline h4 {
+  font-size: .9rem;
+  font-weight: 600;
+  margin-bottom: .5rem;
+}

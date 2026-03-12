@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=4" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=5" />
 </head>
 <body>
 
@@ -20,6 +20,7 @@
         <button class="tab-btn"        data-tab="query-builder" role="tab" aria-selected="false">Boolean&nbsp;Query&nbsp;Builder</button>
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
         <button class="tab-btn"        data-tab="citations"     role="tab" aria-selected="false">Forward&nbsp;Citations</button>
+        <button class="tab-btn"        data-tab="entity-status"  role="tab" aria-selected="false">Entity&nbsp;Status</button>
         <button class="tab-btn"        data-tab="etl-log"       role="tab" aria-selected="false">Update&nbsp;Log</button>
       </nav>
     </div>
@@ -227,7 +228,88 @@
       <div id="cite-status" class="status-msg hidden"></div>
     </section>
 
-    <!-- ===== Tab 5: Data Update Log ===== -->
+    <!-- ===== Tab 5: Entity Status Analytics ===== -->
+    <section id="tab-entity-status" class="tab-panel" role="tabpanel">
+      <h2 class="panel-title">Entity Status Analytics</h2>
+      <p class="panel-desc">
+        Analyze small/micro/large entity status patterns across patents.
+        Track status conversions over time, search for patents that changed
+        entity status, and review applicant portfolios.
+      </p>
+
+      <!-- Summary dashboard (loads on first tab view) -->
+      <div id="es-summary" class="card hidden"></div>
+
+      <!-- Single patent lookup -->
+      <div class="card">
+        <h3 class="card-title">Single Patent Lookup</h3>
+        <p class="card-desc">Enter a patent number to see its entity status timeline and conversion history.</p>
+        <div class="mdm-search-row">
+          <input id="es-patent-input" type="text"
+                 placeholder="e.g. 7654321 or US7,654,321" />
+          <button id="es-patent-btn" class="btn btn-primary">Look Up</button>
+        </div>
+      </div>
+      <div id="es-patent-results" class="results-area hidden"></div>
+
+      <!-- Conversion search -->
+      <div class="card">
+        <h3 class="card-title">Conversion Search</h3>
+        <p class="card-desc">Find patents that changed entity status (e.g. small to large).</p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="es-from-status">From Status</label>
+            <select id="es-from-status">
+              <option value="SMALL" selected>Small</option>
+              <option value="MICRO">Micro</option>
+              <option value="LARGE">Large</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="es-to-status">To Status</label>
+            <select id="es-to-status">
+              <option value="LARGE" selected>Large</option>
+              <option value="SMALL">Small</option>
+              <option value="MICRO">Micro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="es-year-start">Grant Year From</label>
+            <input id="es-year-start" type="number" value="2010" min="1990" max="2026" />
+          </div>
+          <div class="form-group">
+            <label for="es-year-end">Grant Year To</label>
+            <input id="es-year-end" type="number" value="2025" min="1990" max="2026" />
+          </div>
+          <div class="form-group">
+            <label for="es-applicant">Applicant (optional)</label>
+            <input id="es-applicant" type="text" placeholder="e.g. QUALCOMM" />
+          </div>
+          <div class="form-group">
+            <label for="es-conv-limit">Max Results</label>
+            <input id="es-conv-limit" type="number" value="200" min="1" max="1000" />
+          </div>
+        </div>
+        <button id="es-conv-btn" class="btn btn-primary">Search Conversions</button>
+      </div>
+      <div id="es-conv-results" class="results-area hidden"></div>
+
+      <!-- Applicant portfolio -->
+      <div class="card">
+        <h3 class="card-title">Applicant Portfolio</h3>
+        <p class="card-desc">View entity status breakdown for all patents filed by a specific applicant.</p>
+        <div class="mdm-search-row">
+          <input id="es-app-input" type="text"
+                 placeholder="e.g. QUALCOMM or APPLE" />
+          <button id="es-app-btn" class="btn btn-primary">Analyze Portfolio</button>
+        </div>
+      </div>
+      <div id="es-app-results" class="results-area hidden"></div>
+
+      <div id="es-status" class="status-msg hidden"></div>
+    </section>
+
+    <!-- ===== Tab 6: Data Update Log ===== -->
     <section id="tab-etl-log" class="tab-panel" role="tabpanel">
       <h2 class="panel-title">Data Update Log</h2>
       <p class="panel-desc">
@@ -343,6 +425,7 @@
   <script src="/static/js/query_builder.js?v=8" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
   <script src="/static/js/citations.js?v=4"    type="module"></script>
+  <script src="/static/js/entity_status.js?v=1" type="module"></script>
   <script src="/static/js/etl_log.js?v=2"    type="module"></script>
 </body>
 </html>
