@@ -21,15 +21,15 @@ tabBtns.forEach(btn => {
   });
 });
 
-// ---- Help toggle buttons --------------------------------------------------
-document.querySelectorAll('.help-toggle-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const panel = btn.closest('.panel-title-row').nextElementSibling;
-    if (panel && panel.classList.contains('help-panel')) {
-      panel.classList.toggle('hidden');
-      btn.classList.toggle('active');
-    }
-  });
+// ---- Help toggle buttons (event delegation) --------------------------------
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.help-toggle-btn');
+  if (!btn) return;
+  const panel = btn.closest('.panel-title-row')?.nextElementSibling;
+  if (panel && panel.classList.contains('help-panel')) {
+    panel.classList.toggle('hidden');
+    btn.classList.toggle('active');
+  }
 });
 
 // ---- Shared helpers -------------------------------------------------------
