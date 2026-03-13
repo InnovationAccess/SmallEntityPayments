@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=6" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=7" />
 </head>
 <body>
 
@@ -369,6 +369,35 @@
       <!-- Phase 2 results: application list -->
       <div id="px-app-results" class="results-area hidden"></div>
 
+      <!-- Phase 3: Invoice retrieval + extraction (shown after app selection) -->
+      <div id="px-phase3" class="card hidden">
+        <h3 class="card-title">Phase 3 — Invoice Retrieval &amp; Extraction</h3>
+        <p class="card-desc">
+          Retrieve payment-related documents (fee worksheets, payment receipts)
+          from the USPTO for the selected applications, then extract entity status
+          and fee codes using AI vision.
+        </p>
+        <button id="px-retrieve-btn" class="btn btn-primary">Retrieve Invoices</button>
+        <span id="px-retrieve-count" class="results-count" style="margin-left:12px"></span>
+      </div>
+
+      <!-- Phase 3a results: document list -->
+      <div id="px-doc-results" class="results-area hidden"></div>
+
+      <!-- Phase 3b+c: Download & Extract controls (shown after doc retrieval) -->
+      <div id="px-extract-controls" class="card hidden">
+        <h3 class="card-title">Download &amp; Extract</h3>
+        <p class="card-desc">
+          Download selected documents to cloud storage and run AI extraction
+          to identify entity status, fee codes, and payment amounts.
+        </p>
+        <button id="px-download-extract-btn" class="btn btn-primary">Download &amp; Extract Selected</button>
+        <span id="px-extract-progress" class="results-count" style="margin-left:12px"></span>
+      </div>
+
+      <!-- Phase 3c results: extraction output -->
+      <div id="px-extract-results" class="results-area hidden"></div>
+
       <div id="px-status" class="status-msg hidden"></div>
     </section>
 
@@ -489,7 +518,7 @@
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
   <script src="/static/js/citations.js?v=4"    type="module"></script>
   <script src="/static/js/entity_status.js?v=1" type="module"></script>
-  <script src="/static/js/prosecution.js?v=1" type="module"></script>
+  <script src="/static/js/prosecution.js?v=2" type="module"></script>
   <script src="/static/js/etl_log.js?v=2"    type="module"></script>
 </body>
 </html>

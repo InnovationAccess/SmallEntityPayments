@@ -973,3 +973,83 @@ textarea { resize: vertical; }
   font-size: .78rem;
   margin-left: .5rem;
 }
+
+/* Document row (Phase 3) */
+.px-doc-row {
+  cursor: pointer;
+  transition: background .15s;
+}
+.px-doc-row:hover {
+  background: #f0f6ff;
+}
+.px-doc-row.px-selected {
+  background: #cfe2ff;
+}
+
+/* Extraction result cards */
+.px-extract-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: #fafbfc;
+}
+.px-extract-card h4 {
+  margin: 0 0 .5rem;
+  font-size: .95rem;
+  color: #333;
+}
+.px-extract-card .px-field {
+  display: flex;
+  gap: .5rem;
+  margin: .25rem 0;
+  font-size: .85rem;
+}
+.px-extract-card .px-field-label {
+  font-weight: 600;
+  color: #555;
+  min-width: 130px;
+}
+.px-extract-card .px-field-value {
+  color: #222;
+}
+.px-extract-card .px-entity-small { color: #e67700; font-weight: 600; }
+.px-extract-card .px-entity-large { color: #1a73e8; font-weight: 600; }
+.px-extract-card .px-entity-micro { color: #0d6e0d; font-weight: 600; }
+
+/* Fee table inside extraction card */
+.px-fee-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: .5rem;
+  font-size: .82rem;
+}
+.px-fee-table th,
+.px-fee-table td {
+  padding: .35rem .5rem;
+  border: 1px solid #ddd;
+  text-align: left;
+}
+.px-fee-table th {
+  background: #f0f3f5;
+  font-weight: 600;
+}
+.px-fee-table td:last-child {
+  text-align: right;
+}
+
+/* Progress indicator */
+.px-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  margin: .5rem 0;
+  overflow: hidden;
+}
+.px-progress-fill {
+  height: 100%;
+  background: #1a73e8;
+  border-radius: 3px;
+  transition: width .3s;
+}

@@ -2,19 +2,41 @@
 
 Phase 1: Entity discovery — find entities with N+ SMAL declarations (2016+)
 Phase 2: Application drill-down — list applications for a selected entity
-Phase 3: PDF extraction — extract fee codes from payment invoices (future)
+Phase 3: Document retrieval + fee code extraction from payment invoices
 """
 
 from __future__ import annotations
 
+import base64
+import json
+import logging
+import re
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, status
-from google.cloud import bigquery
+from google.cloud import bigquery, storage
 from pydantic import BaseModel
 
 from api.config import settings
 from api.services.bigquery_service import bq_service
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ────────────────────────────────────────────────────
+
+USPTO_API_KEY = "inbsszqfwwnkjfebpibunnbllbygqz"
+USPTO_DOC_API = "https://api.uspto.gov/api/v1/patent/applications/{}/documents"
+GCS_BUCKET = "uspto-bulk-staging"
+GCS_INVOICE_PREFIX = "prosecution-invoices"
+
+# Keywords for identifying payment-related documents
+PAYMENT_KEYWORDS = [
+    "FEE WORKSHEET", "SB06", "PAYMENT RECEIPT", "FEE PAYMENT",
+    "FEE RECORDATION", "FEE CALCULATION", "FEE SHEET",
+]
+# Document codes that are payment-related
+PAYMENT_DOC_CODES = {"WFEE"}
 
 router = APIRouter(prefix="/api/prosecution", tags=["Prosecution Payments"])
 
@@ -33,6 +55,21 @@ class ApplicationDrilldownRequest(BaseModel):
     date_from: str = "2016-01-01"
     date_to: str = "2026-12-31"
     limit: int = 5000
+
+
+class DocumentListRequest(BaseModel):
+    """Phase 3a: list payment-related documents for selected applications."""
+    application_numbers: List[str]
+
+
+class DocumentDownloadRequest(BaseModel):
+    """Phase 3b: download specific documents to GCS."""
+    documents: List[Dict[str, str]]  # [{app_number, download_url, filename}]
+
+
+class DocumentExtractRequest(BaseModel):
+    """Phase 3c: extract fee codes from a downloaded PDF."""
+    gcs_path: str  # e.g. "prosecution-invoices/14414087/Fee_Worksheet.pdf"
 
 
 # ── Phase 1: Entity discovery ────────────────────────────────────
@@ -189,3 +226,369 @@ def list_applications(req: ApplicationDrilldownRequest) -> Dict[str, Any]:
         "date_to": req.date_to,
         "results": results,
     }
+
+
+# ── Phase 3: Document retrieval + extraction ───────────────────
+
+GEMINI_PROJECT = "uspto-data-app"
+GEMINI_LOCATION = "us-central1"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+GEMINI_PROMPT = """You are analyzing a USPTO patent payment document (PDF image).
+
+Extract ALL of the following information as structured JSON:
+
+1. **doc_type**: One of:
+   - "FEE_WORKSHEET_SB06" — PTO/SB/06 or PTO-875 Fee Determination Record
+   - "ELECTRONIC_FEE_TRANSMITTAL" — Electronic Patent Application Fee Transmittal
+   - "ISSUE_FEE_PTO85B" — PTO-85B / Part B Fee(s) Transmittal / Issue Fee Payment
+   - "ELECTRONIC_PAYMENT_RECEIPT" — Electronic Payment Receipt
+   - "UNKNOWN" — none of the above
+
+2. **application_number**: The patent application number (digits only, no slashes/commas)
+
+3. **filing_date**: Filing date if shown
+
+4. **entity_status**: Look for:
+   - Checked checkboxes next to LARGE, SMALL, or MICRO
+   - Text like "Filed as Small Entity" or "ENTITY STATUS: SMALL"
+   - Column headers: if fees are in "SMALL ENTITY" column, entity_status = "SMALL"
+   - Return: "SMALL", "LARGE", "MICRO", or null
+
+5. **title**: Title of invention if shown
+
+6. **fees**: Array of fee line items. For each fee:
+   - **fee_code**: Numeric fee code (e.g. "2820", "1833") — null if not shown
+   - **description**: Fee description
+   - **amount**: Dollar amount per item
+   - **quantity**: How many (default 1)
+   - **item_total**: Line total if shown
+
+   For SB06 forms with fee rates (not codes), extract the fee type + amount.
+
+7. **total_amount**: Total payment if shown
+
+8. **assignee_name**: Name of assignee if shown
+
+9. **issue_fee_due**: For PTO-85B forms, issue fee due amount
+
+10. **entity_status_evidence**: Brief quote proving the entity status
+
+Return ONLY valid JSON. No markdown, no code fences, no explanation."""
+
+
+def _get_gcp_access_token() -> str:
+    """Get access token using default credentials (works on Cloud Run + local gcloud)."""
+    import google.auth
+    import google.auth.transport.requests
+
+    creds, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    creds.refresh(google.auth.transport.requests.Request())
+    return creds.token
+
+
+def _is_payment_doc(doc: dict) -> bool:
+    """Check if a USPTO document is payment-related by code or description."""
+    code = (doc.get("documentCode") or "").upper()
+    desc = (doc.get("documentCodeDescriptionText") or "").upper()
+    return code in PAYMENT_DOC_CODES or any(kw in desc for kw in PAYMENT_KEYWORDS)
+
+
+@router.post("/documents")
+def list_payment_documents(req: DocumentListRequest) -> Dict[str, Any]:
+    """
+    Phase 3a: For selected application numbers, query the USPTO ODP API
+    to find payment-related documents (fee worksheets, payment receipts, etc.).
+
+    Returns a flat list of matching documents with download URLs.
+    """
+    if not req.application_numbers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No application numbers provided",
+        )
+    if len(req.application_numbers) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 200 applications per request",
+        )
+
+    results: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    with httpx.Client(timeout=30) as client:
+        for app_num in req.application_numbers:
+            try:
+                url = USPTO_DOC_API.format(app_num)
+                resp = client.get(url, headers={
+                    "X-API-KEY": USPTO_API_KEY,
+                    "Accept": "application/json",
+                })
+
+                if resp.status_code != 200:
+                    errors.append({
+                        "app": app_num,
+                        "error": f"HTTP {resp.status_code}",
+                    })
+                    continue
+
+                data = resp.json()
+                doc_bag = data.get("documentBag", [])
+
+                for doc in doc_bag:
+                    if not _is_payment_doc(doc):
+                        continue
+
+                    downloads = doc.get("downloadOptionBag", [])
+                    download_url = None
+                    if downloads:
+                        download_url = downloads[0].get("downloadUrl")
+
+                    results.append({
+                        "app_number": app_num,
+                        "doc_id": doc.get("documentIdentifier"),
+                        "doc_code": doc.get("documentCode"),
+                        "description": doc.get("documentCodeDescriptionText"),
+                        "mail_date": doc.get("officialDate"),
+                        "download_url": download_url,
+                        "page_count": doc.get("pageCount"),
+                        "filename": (
+                            f"{app_num}_{doc.get('documentCode', 'DOC')}"
+                            f"_{doc.get('documentIdentifier', 'unknown')}.pdf"
+                        ),
+                    })
+
+            except httpx.TimeoutException:
+                errors.append({"app": app_num, "error": "Request timed out"})
+            except Exception as e:
+                errors.append({"app": app_num, "error": str(e)})
+                logger.warning("Failed to query docs for %s: %s", app_num, e)
+
+    return {
+        "total": len(results),
+        "apps_queried": len(req.application_numbers),
+        "apps_with_errors": len(errors),
+        "errors": errors,
+        "results": results,
+    }
+
+
+@router.post("/download")
+def download_documents(req: DocumentDownloadRequest) -> Dict[str, Any]:
+    """
+    Phase 3b: Download selected PDF documents from USPTO and save to GCS.
+
+    Each document dict must have: app_number, download_url, filename.
+    PDFs are saved to gs://uspto-bulk-staging/prosecution-invoices/{app_number}/{filename}.
+    """
+    if not req.documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No documents to download",
+        )
+    if len(req.documents) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 100 documents per request",
+        )
+
+    gcs_client = storage.Client()
+    bucket = gcs_client.bucket(GCS_BUCKET)
+    downloaded: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    with httpx.Client(timeout=60) as client:
+        for doc in req.documents:
+            app_num = doc.get("app_number", "unknown")
+            download_url = doc.get("download_url")
+            filename = doc.get("filename", "document.pdf")
+
+            if not download_url:
+                errors.append({"filename": filename, "error": "No download URL"})
+                continue
+
+            try:
+                resp = client.get(download_url, headers={
+                    "X-API-KEY": USPTO_API_KEY,
+                    "Accept": "application/pdf",
+                })
+
+                if resp.status_code != 200:
+                    errors.append({
+                        "filename": filename,
+                        "error": f"HTTP {resp.status_code}",
+                    })
+                    continue
+
+                # Upload to GCS
+                gcs_path = f"{GCS_INVOICE_PREFIX}/{app_num}/{filename}"
+                blob = bucket.blob(gcs_path)
+                blob.upload_from_string(
+                    resp.content,
+                    content_type="application/pdf",
+                )
+
+                downloaded.append({
+                    "app_number": app_num,
+                    "filename": filename,
+                    "gcs_path": gcs_path,
+                    "size_bytes": len(resp.content),
+                })
+
+            except httpx.TimeoutException:
+                errors.append({"filename": filename, "error": "Download timed out"})
+            except Exception as e:
+                errors.append({"filename": filename, "error": str(e)})
+                logger.warning("Failed to download %s: %s", filename, e)
+
+    return {
+        "total_downloaded": len(downloaded),
+        "total_errors": len(errors),
+        "downloaded": downloaded,
+        "errors": errors,
+    }
+
+
+@router.post("/extract")
+def extract_fee_codes(req: DocumentExtractRequest) -> Dict[str, Any]:
+    """
+    Phase 3c: Read a PDF from GCS and run Gemini Vision extraction
+    to get entity status, fee codes, and payment amounts.
+
+    Returns structured JSON with doc_type, entity_status, fees[], etc.
+    """
+    if not req.gcs_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="gcs_path is required",
+        )
+
+    # 1. Read PDF from GCS
+    try:
+        gcs_client = storage.Client()
+        bucket = gcs_client.bucket(GCS_BUCKET)
+        blob = bucket.blob(req.gcs_path)
+        if not blob.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"PDF not found in GCS: {req.gcs_path}",
+            )
+        pdf_bytes = blob.download_as_bytes()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read from GCS: {e}",
+        )
+
+    # 2. Base64-encode the PDF
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    # 3. Call Gemini Vision via Vertex AI REST API
+    try:
+        token = _get_gcp_access_token()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get GCP credentials: {e}",
+        )
+
+    vertex_url = (
+        f"https://{GEMINI_LOCATION}-aiplatform.googleapis.com/v1/"
+        f"projects/{GEMINI_PROJECT}/locations/{GEMINI_LOCATION}/"
+        f"publishers/google/models/{GEMINI_MODEL}:generateContent"
+    )
+
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": GEMINI_PROMPT},
+                {
+                    "inlineData": {
+                        "mimeType": "application/pdf",
+                        "data": pdf_b64,
+                    }
+                },
+            ],
+        }],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 4096,
+        },
+    }
+
+    try:
+        with httpx.Client(timeout=90) as client:
+            resp = client.post(
+                vertex_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Gemini Vision request timed out",
+        )
+
+    if resp.status_code != 200:
+        logger.error("Gemini API error %d: %s", resp.status_code, resp.text[:500])
+        return {
+            "gcs_path": req.gcs_path,
+            "doc_type": "UNKNOWN",
+            "error": f"Gemini API error {resp.status_code}",
+            "entity_status": None,
+            "fees": [],
+        }
+
+    # 4. Parse Gemini response
+    resp_json = resp.json()
+    candidates = resp_json.get("candidates", [])
+    if not candidates:
+        return {
+            "gcs_path": req.gcs_path,
+            "doc_type": "UNKNOWN",
+            "error": "No candidates in Gemini response",
+            "entity_status": None,
+            "fees": [],
+        }
+
+    text = candidates[0]["content"]["parts"][0]["text"].strip()
+
+    # Remove markdown code fences if present
+    if text.startswith("```"):
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        # Try to find JSON object in the response
+        m = re.search(r'\{.*\}', text, re.DOTALL)
+        if m:
+            try:
+                result = json.loads(m.group())
+            except json.JSONDecodeError:
+                result = {
+                    "doc_type": "UNKNOWN",
+                    "error": "Could not parse Gemini response",
+                    "entity_status": None,
+                    "fees": [],
+                }
+        else:
+            result = {
+                "doc_type": "UNKNOWN",
+                "error": "No JSON in Gemini response",
+                "entity_status": None,
+                "fees": [],
+            }
+
+    result["gcs_path"] = req.gcs_path
+    result["extraction_method"] = "gemini_vision"
+    return result
