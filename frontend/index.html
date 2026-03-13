@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=7" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=8" />
 </head>
 <body>
 
@@ -31,7 +31,27 @@
 
     <!-- ===== Tab 1: MDM Name Normalization ===== -->
     <section id="tab-mdm" class="tab-panel active" role="tabpanel">
-      <h2 class="panel-title">MDM – Entity Name Normalization</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">MDM – Entity Name Normalization</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use MDM Name Normalization</h4>
+        <ol>
+          <li><strong>Search</strong> for entity names using boolean expressions in the search bar:
+            <ul>
+              <li><code>GOOG*</code> — wildcard matches GOOGLE, GOOGLE LLC, GOOGLE INC, etc.</li>
+              <li><code>MICRO*+CORP</code> — AND: names containing both MICRO... and CORP</li>
+              <li><code>APPLE+-INC</code> — NOT: names with APPLE but without INC</li>
+            </ul>
+          </li>
+          <li><strong>Copy</strong> a representative name by clicking the copy icon in the table. This sets the "canonical" name.</li>
+          <li><strong>Paste</strong> to associate variant names with the copied representative. Click the paste icon on each variant row.</li>
+          <li><strong>Address lookup</strong>: Click the address icon next to any name to see registered addresses, then search for other entities at those addresses.</li>
+          <li><strong>Delete</strong>: Click the trash icon to remove an existing name association.</li>
+        </ol>
+        <p>Frequency shows how many times each name appears across patent assignments. Higher frequency names are typically better candidates for the representative name.</p>
+      </div>
       <p class="panel-desc">
         Search entity names across patent and assignment data using boolean
         expressions. Select a Representative Name (Copy), then associate
@@ -82,7 +102,27 @@
 
     <!-- ===== Tab 2: Boolean Query Builder ===== -->
     <section id="tab-query-builder" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">Boolean Query Builder</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">Boolean Query Builder</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use the Query Builder</h4>
+        <ol>
+          <li><strong>Select tables</strong> to query against: Patent File Wrapper, Assignments, and/or Maintenance Fees. Hold Ctrl to select multiple.</li>
+          <li><strong>Add conditions</strong> by clicking "+ Add Condition". Each condition has:
+            <ul>
+              <li><em>Field</em> — the data column to filter on (e.g., applicant_name, filing_date, patent_number)</li>
+              <li><em>Operator</em> — LIKE, =, &gt;, &lt;, BETWEEN, IN, etc.</li>
+              <li><em>Value</em> — the search value (use % as wildcard in LIKE queries)</li>
+            </ul>
+          </li>
+          <li><strong>AND / OR toggle</strong> controls how multiple conditions combine. AND returns rows matching all conditions; OR returns rows matching any.</li>
+          <li><strong>Entity name expansion</strong>: When you search by applicant or assignee name, the system automatically includes all known name variants from the MDM tab.</li>
+          <li><strong>Click "Execute Query"</strong> to run. Results appear in an interactive table with sortable columns.</li>
+          <li><strong>Patent numbers</strong> in results are clickable — hover to see the assignment chain for that patent.</li>
+        </ol>
+      </div>
       <p class="panel-desc">
         Construct multi-condition queries across patent data, assignments,
         and maintenance fee records. Entity name searches automatically
@@ -125,7 +165,26 @@
 
     <!-- ===== Tab 3: AI Assistant ===== -->
     <section id="tab-ai-assistant" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">AI Assistant – Natural Language Query</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">AI Assistant – Natural Language Query</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use the AI Assistant</h4>
+        <ol>
+          <li><strong>Ask in plain English</strong>. Describe the data you need, for example:
+            <ul>
+              <li>"Show me all patents filed by Samsung that changed from small to large entity"</li>
+              <li>"Find the top 10 assignees by number of maintenance fee payments in 2023"</li>
+              <li>"Which patents filed after 2020 have the most forward citations?"</li>
+            </ul>
+          </li>
+          <li><strong>Refine through conversation</strong>. The AI remembers context, so you can say things like "narrow that to just California applicants" or "add the filing date column".</li>
+          <li><strong>The AI generates SQL</strong> behind the scenes and runs it against all your patent data tables. Click the "Generated SQL" accordion to see the query.</li>
+          <li><strong>Results appear as interactive tables</strong> with sortable columns. Patent numbers are clickable for assignment chain lookup.</li>
+        </ol>
+        <p>The AI has access to all tables: patents, assignments (normalized v4), maintenance fees, citations, continuity data, and prosecution transactions.</p>
+      </div>
       <p class="panel-desc">
         Chat with the AI about your patent data. Describe what you need, refine
         the query through conversation, then ask it to run when ready.
@@ -153,7 +212,21 @@
 
     <!-- ===== Tab 4: Forward Citations ===== -->
     <section id="tab-citations" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">Forward Citation Lookup</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">Forward Citation Lookup</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use Forward Citation Lookup</h4>
+        <ol>
+          <li><strong>Enter a patent number</strong> in any format: <code>7654321</code>, <code>US7,654,321</code>, or <code>RE49123</code>. The system strips formatting automatically.</li>
+          <li><strong>Summary cards</strong> show total citation count, breakdown by examiner vs. applicant citations, and the date range of citing patents.</li>
+          <li><strong>Year-by-year chart</strong> shows citation trends over time.</li>
+          <li><strong>Examiner and Applicant lists</strong> show which patent examiners and which applicant companies cited your patent most frequently.</li>
+          <li><strong>Full citation table</strong> lists every citing patent with sortable columns. Patent numbers are clickable for assignment chain lookup.</li>
+        </ol>
+        <p><strong>Why it matters:</strong> Forward citations indicate a patent's influence. High examiner citations suggest the patent is considered important prior art. High applicant citations may indicate design-around activity.</p>
+      </div>
       <p class="panel-desc">
         Enter a patent number to see which later-granted patents cite it.
         Results include citation category (examiner vs. applicant),
@@ -231,7 +304,26 @@
 
     <!-- ===== Tab 5: Entity Status Analytics ===== -->
     <section id="tab-entity-status" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">Entity Status Analytics</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">Entity Status Analytics</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use Entity Status Analytics</h4>
+        <p>This tab analyzes entity status (Small / Micro / Large) based on prosecution event codes in the patent file wrapper, not the USPTO's entity_status field.</p>
+        <ol>
+          <li><strong>Single Patent Lookup</strong> — Enter a patent number to see its full entity status timeline: every SMAL, BIG., and MICR event in chronological order, plus any status changes.</li>
+          <li><strong>Conversion Search</strong> — Find patents that changed entity status. For example, search for patents that went from Small to Large:
+            <ul>
+              <li>Set "From Status" and "To Status"</li>
+              <li>Optionally filter by grant year range and applicant name</li>
+              <li>Results show the conversion date and surrounding events</li>
+            </ul>
+          </li>
+          <li><strong>Applicant Portfolio</strong> — Enter an applicant name to see their complete entity status breakdown: how many patents filed as small vs. large, conversion rates, and trends over time.</li>
+        </ol>
+        <p><strong>Event codes:</strong> SMAL = Small Entity declaration, BIG. = Large Entity declaration, MICR = Micro Entity declaration.</p>
+      </div>
       <p class="panel-desc">
         Analyze small/micro/large entity status patterns across patents.
         Track status conversions over time, search for patents that changed
@@ -312,7 +404,33 @@
 
     <!-- ===== Tab 6: Prosecution Fee Investigation ===== -->
     <section id="tab-prosecution" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">Prosecution Fee Investigation</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">Prosecution Fee Investigation</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use Prosecution Fee Investigation</h4>
+        <p>This is a 3-phase workflow for investigating prosecution payment patterns:</p>
+        <ol>
+          <li><strong>Phase 1 — Entity Discovery:</strong> Set a minimum number of small entity (SMAL) declarations to find entities with significant prosecution activity. Default is 1,000. Click "Discover Entities" to search. Click any entity row to select it.</li>
+          <li><strong>Phase 2 — Application Drill-down:</strong> After selecting an entity, adjust the date range if needed and click "Load Applications". The table shows all applications with SMAL declarations.
+            <ul>
+              <li><strong>Ctrl+Click</strong> to select/deselect individual rows</li>
+              <li><strong>Shift+Click</strong> to select a range of rows</li>
+              <li><strong>Plain click</strong> selects only that row</li>
+              <li>Patent numbers are hoverable for assignment chain lookup</li>
+            </ul>
+          </li>
+          <li><strong>Phase 3 — Invoice Retrieval &amp; Extraction:</strong> After selecting applications, click "Retrieve Invoices" to query the USPTO for payment documents. All found documents are pre-selected. Click "Download &amp; Extract" to:
+            <ul>
+              <li>Download PDFs from USPTO to cloud storage</li>
+              <li>Run AI vision extraction on each document</li>
+              <li>Results show entity status, fee codes, payment amounts, and evidence</li>
+            </ul>
+          </li>
+        </ol>
+        <p><strong>Document types extracted:</strong> Fee Worksheets (SB06), Electronic Fee Transmittals, Issue Fee Payments (PTO-85B), and Electronic Payment Receipts.</p>
+      </div>
       <p class="panel-desc">
         Investigate prosecution payment patterns for entities that declared small
         entity status. Identify entities, drill into their applications, retrieve
@@ -403,7 +521,27 @@
 
     <!-- ===== Tab 7: Data Update Log ===== -->
     <section id="tab-etl-log" class="tab-panel" role="tabpanel">
-      <h2 class="panel-title">Data Update Log</h2>
+      <div class="panel-title-row">
+        <h2 class="panel-title">Data Update Log</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Read the Update Log</h4>
+        <ol>
+          <li><strong>Source cards</strong> at the top show the 4 automated data pipelines and their schedules:
+            <ul>
+              <li><strong>Citations</strong> (PTBLXML) — Weekly on Sundays at 2 AM</li>
+              <li><strong>Assignments</strong> (PASDL) — Weekly on Mondays at 3 AM</li>
+              <li><strong>Maintenance Fees</strong> (PTMNFEE2) — Monthly on the 1st at 4 AM</li>
+              <li><strong>File Wrapper</strong> (PTFWPRE) — Monthly on the 15th at 1 AM</li>
+            </ul>
+          </li>
+          <li><strong>Run history table</strong> shows each pipeline execution with status, start time, duration, files processed, and rows loaded.</li>
+          <li><strong>Status indicators:</strong> Green = success, Red = failed, Yellow = running.</li>
+          <li>Click <strong>Refresh</strong> to reload the latest pipeline data.</li>
+        </ol>
+        <p>All data comes from official USPTO bulk data products. Times shown are Pacific (America/Los_Angeles).</p>
+      </div>
       <p class="panel-desc">
         Automated pipeline run history. Each data source updates on its own
         schedule from official USPTO bulk downloads.
@@ -512,7 +650,7 @@
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
 
-  <script src="/static/js/app.js?v=11"          type="module"></script>
+  <script src="/static/js/app.js?v=12"          type="module"></script>
   <script src="/static/js/mdm.js?v=8"           type="module"></script>
   <script src="/static/js/query_builder.js?v=8" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>

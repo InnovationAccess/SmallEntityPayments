@@ -21,6 +21,17 @@ tabBtns.forEach(btn => {
   });
 });
 
+// ---- Help toggle buttons --------------------------------------------------
+document.querySelectorAll('.help-toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.closest('.panel-title-row').nextElementSibling;
+    if (panel && panel.classList.contains('help-panel')) {
+      panel.classList.toggle('hidden');
+      btn.classList.toggle('active');
+    }
+  });
+});
+
 // ---- Shared helpers -------------------------------------------------------
 
 /**
