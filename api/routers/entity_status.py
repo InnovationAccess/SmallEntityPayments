@@ -55,7 +55,7 @@ class ConversionSearchRequest(BaseModel):
 
 class ApplicantRequest(BaseModel):
     applicant_name: str
-    limit: int = 500
+    limit: int = 5000
 
 
 # ── Endpoints ─────────────────────────────────────────────────────
@@ -299,87 +299,278 @@ def search_conversions(req: ConversionSearchRequest) -> Dict[str, Any]:
 
 @router.post("/by-applicant")
 def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
-    """Entity status breakdown for all patents of a given applicant.
+    """Full portfolio analysis for an entity — prosecution AND post-grant.
 
-    Status derived from maintenance fee event codes only.
+    Searches ALL applicants, inventors, and assignees (not just first_applicant_name).
+    Provides entity status from two phases:
+      - Prosecution: SMAL/BIG./MICR codes from pfw_transactions
+      - Post-grant: M-code payments, declaration events, and transition codes
+        from maintenance_fee_events_v2
     """
     expanded = bq_service.expand_name_for_query(req.applicant_name)
 
-    params = []
+    params: List = []
     if len(expanded) > 1:
         for i, name in enumerate(expanded):
             params.append(bigquery.ScalarQueryParameter(f"name_{i}", "STRING", name))
         name_in = ", ".join(f"@name_{i}" for i in range(len(expanded)))
-        name_filter = f"pfw.first_applicant_name IN ({name_in})"
     else:
-        params.append(bigquery.ScalarQueryParameter("app_name", "STRING", req.applicant_name))
-        name_filter = "LOWER(pfw.first_applicant_name) = LOWER(@app_name)"
+        params.append(bigquery.ScalarQueryParameter("name_0", "STRING", req.applicant_name))
+        name_in = "@name_0"
 
-    params.append(bigquery.ScalarQueryParameter("limit", "INT64", min(req.limit, 2000)))
+    params.append(bigquery.ScalarQueryParameter("limit", "INT64", min(req.limit, 10000)))
 
-    sql = f"""
-    WITH applicant_patents AS (
-      SELECT patent_number, application_number, filing_date, grant_date,
-             invention_title, first_applicant_name
-      FROM `{settings.patent_table}` pfw
-      WHERE {name_filter}
-        AND patent_number IS NOT NULL
-    ),
-    maint_statuses AS (
-      SELECT m.patent_number,
-        ARRAY_AGG({DERIVE_STATUS_SQL} ORDER BY m.event_date ASC LIMIT 1)[OFFSET(0)] AS first_maint_status,
-        ARRAY_AGG({DERIVE_STATUS_SQL} ORDER BY m.event_date DESC LIMIT 1)[OFFSET(0)] AS latest_maint_status
-      FROM `{settings.maintenance_table}` m
-      WHERE m.patent_number IN (SELECT patent_number FROM applicant_patents)
-        AND {DERIVE_STATUS_SQL} IS NOT NULL
-      GROUP BY m.patent_number
+    # ── Query 1: Portfolio assembly ────────────────────────────────
+    # Find all application_numbers where entity appears as applicant,
+    # inventor, or assignee.  Includes first_applicant_name as fallback
+    # (works even when pfw_applicants is empty before first pipeline run).
+    portfolio_sql = f"""
+    WITH portfolio_apps AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+        UNION DISTINCT
+        SELECT d.application_number
+        FROM `{settings.assign_documents_table}` d
+        JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+        WHERE a.assignee_name IN ({name_in})
+          AND d.application_number IS NOT NULL
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.patent_table}`
+        WHERE first_applicant_name IN ({name_in})
+      )
     )
     SELECT
-      ap.patent_number, ap.application_number, ap.invention_title,
-      ap.filing_date, ap.grant_date,
-      ms.first_maint_status, ms.latest_maint_status
-    FROM applicant_patents ap
-    LEFT JOIN maint_statuses ms ON ms.patent_number = ap.patent_number
-    ORDER BY ap.grant_date DESC
+      p.application_number, p.patent_number, p.filing_date, p.grant_date,
+      p.invention_title, p.first_applicant_name
+    FROM `{settings.patent_table}` p
+    WHERE p.application_number IN (SELECT application_number FROM portfolio_apps)
+    ORDER BY p.grant_date DESC NULLS LAST
     LIMIT @limit
     """
-    rows = bq_service.run_query(sql, params)
+    portfolio_rows = bq_service.run_query(portfolio_sql, params)
+
+    if not portfolio_rows:
+        return {
+            "applicant_name": req.applicant_name,
+            "expanded_names": expanded,
+            "total_patents": 0,
+            "total_applications": 0,
+            "sold_count": 0,
+            "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0},
+            "post_grant": {
+                "small": 0, "large": 0, "micro": 0, "total": 0,
+                "stol": 0, "ltos": 0, "stom": 0,
+                "declarations": 0,
+            },
+            "results": [],
+        }
+
+    # Collect IDs for subsequent queries
+    app_nums = []
+    pat_nums = []
+    for r in portfolio_rows:
+        app_nums.append(r["application_number"])
+        if r.get("patent_number"):
+            pat_nums.append(r["patent_number"])
+
+    # ── Query 2: Post-grant events (maintenance_fee_events_v2) ─────
+    # Payment codes derive entity status; also count declarations and transitions.
+    pg_params = [
+        bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums),
+    ]
+    postgrant_sql = f"""
+    SELECT
+      m.patent_number,
+      ARRAY_AGG(
+        {DERIVE_STATUS_SQL} ORDER BY m.event_date ASC LIMIT 1
+      )[OFFSET(0)] AS first_maint_status,
+      ARRAY_AGG(
+        {DERIVE_STATUS_SQL} ORDER BY m.event_date DESC LIMIT 1
+      )[OFFSET(0)] AS latest_maint_status,
+      COUNTIF(m.event_code = 'BIG.')  AS decl_big,
+      COUNTIF(m.event_code = 'SMAL')  AS decl_smal,
+      COUNTIF(m.event_code = 'MICR')  AS decl_micr,
+      COUNTIF(m.event_code = 'STOL')  AS trans_stol,
+      COUNTIF(m.event_code = 'LTOS')  AS trans_ltos,
+      COUNTIF(m.event_code = 'STOM')  AS trans_stom,
+      MIN(CASE
+        WHEN {DERIVE_STATUS_SQL} IS NOT NULL
+          AND {DERIVE_STATUS_SQL} != ARRAY_AGG(
+            {DERIVE_STATUS_SQL} ORDER BY m.event_date ASC LIMIT 1
+          )[OFFSET(0)]
+        THEN m.event_date
+      END) AS change_date
+    FROM `{settings.maintenance_table}` m
+    WHERE m.patent_number IN UNNEST(@pn_list)
+      AND (
+        {DERIVE_STATUS_SQL} IS NOT NULL
+        OR m.event_code IN ('BIG.', 'SMAL', 'MICR', 'STOL', 'LTOS', 'STOM')
+      )
+    GROUP BY m.patent_number
+    """ if pat_nums else None
+
+    pg_by_patent = {}
+    if postgrant_sql:
+        pg_rows = bq_service.run_query(postgrant_sql, pg_params)
+        for r in pg_rows:
+            pg_by_patent[r["patent_number"]] = r
+
+    # ── Query 3: Prosecution declarations (pfw_transactions) ───────
+    # SMAL, BIG., MICR codes during prosecution phase.
+    pros_params = [
+        bigquery.ArrayQueryParameter("an_list", "STRING", app_nums),
+    ]
+    prosecution_sql = f"""
+    SELECT
+      t.application_number,
+      ARRAY_AGG(t.event_code ORDER BY t.event_date ASC LIMIT 1)[OFFSET(0)]
+        AS first_pros_status,
+      ARRAY_AGG(t.event_code ORDER BY t.event_date DESC LIMIT 1)[OFFSET(0)]
+        AS latest_pros_status,
+      COUNTIF(t.event_code = 'SMAL')  AS pros_smal,
+      COUNTIF(t.event_code = 'BIG.')  AS pros_big,
+      COUNTIF(t.event_code = 'MICR')  AS pros_micr
+    FROM `{settings.pfw_transactions_table}` t
+    WHERE t.application_number IN UNNEST(@an_list)
+      AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
+    GROUP BY t.application_number
+    """
+    pros_by_app = {}
+    pros_rows = bq_service.run_query(prosecution_sql, pros_params)
+    for r in pros_rows:
+        pros_by_app[r["application_number"]] = r
+
+    # ── Query 4: Sold count ────────────────────────────────────────
+    # Patents where the entity appears as assignOR (transferred away).
+    sold_params = list(params[:-1])  # reuse name params, drop limit
+    sold_sql = f"""
+    SELECT COUNT(DISTINCT d.application_number) AS sold_count
+    FROM `{settings.assign_documents_table}` d
+    JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+    WHERE d.application_number IN UNNEST(@an_list)
+      AND a.assignor_name IN ({name_in})
+    """
+    sold_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
+    sold_rows = bq_service.run_query(sold_sql, sold_params)
+    sold_count = sold_rows[0]["sold_count"] if sold_rows else 0
+
+    # ── Merge results ──────────────────────────────────────────────
+    PROS_CODE_MAP = {"SMAL": "SMALL", "BIG.": "LARGE", "MICR": "MICRO"}
 
     results = []
-    total = 0
-    small_count = 0
-    converted_count = 0
-    for r in rows:
-        total += 1
-        first = r.get("first_maint_status")
-        current = r.get("latest_maint_status") or first
-        changed = (
-            first is not None
-            and r.get("latest_maint_status") is not None
-            and first != r["latest_maint_status"]
+    total_patents = 0
+    total_applications = len(portfolio_rows)
+    # Dashboard accumulators — prosecution
+    pros_small = 0
+    pros_large = 0
+    pros_micro = 0
+    pros_total = 0
+    # Dashboard accumulators — post-grant
+    pg_small = 0
+    pg_large = 0
+    pg_micro = 0
+    pg_total = 0
+    pg_stol = 0
+    pg_ltos = 0
+    pg_stom = 0
+    pg_declarations = 0
+    pg_converted = 0
+
+    for r in portfolio_rows:
+        app_num = r["application_number"]
+        pat_num = r.get("patent_number")
+        if pat_num:
+            total_patents += 1
+
+        # Prosecution data
+        pros = pros_by_app.get(app_num, {})
+        pros_status_raw = pros.get("latest_pros_status")
+        pros_status = PROS_CODE_MAP.get(pros_status_raw)
+        first_pros_raw = pros.get("first_pros_status")
+        first_pros = PROS_CODE_MAP.get(first_pros_raw)
+        if pros_status:
+            pros_total += 1
+            if pros_status == "SMALL":
+                pros_small += 1
+            elif pros_status == "LARGE":
+                pros_large += 1
+            elif pros_status == "MICRO":
+                pros_micro += 1
+
+        # Post-grant data
+        pg = pg_by_patent.get(pat_num, {}) if pat_num else {}
+        pg_first = pg.get("first_maint_status")
+        pg_latest = pg.get("latest_maint_status")
+        pg_change = pg.get("change_date")
+        if pg_first:
+            pg_total += 1
+            if pg_first == "SMALL":
+                pg_small += 1
+            elif pg_first == "LARGE":
+                pg_large += 1
+            elif pg_first == "MICRO":
+                pg_micro += 1
+        pg_stol += pg.get("trans_stol", 0)
+        pg_ltos += pg.get("trans_ltos", 0)
+        pg_stom += pg.get("trans_stom", 0)
+        pg_declarations += (
+            pg.get("decl_big", 0) + pg.get("decl_smal", 0) + pg.get("decl_micr", 0)
         )
-        if first and first in ("SMALL", "MICRO"):
-            small_count += 1
-        if changed:
-            converted_count += 1
+        if pg_first and pg_latest and pg_first != pg_latest:
+            pg_converted += 1
+
+        # Determine overall change
+        changed = False
+        change_phase = None
+        if pg_first and pg_latest and pg_first != pg_latest:
+            changed = True
+            change_phase = "post_grant"
+        elif first_pros and pros_status and first_pros != pros_status:
+            changed = True
+            change_phase = "prosecution"
 
         results.append({
-            "patent_number": r["patent_number"],
-            "application_number": r.get("application_number"),
+            "patent_number": pat_num,
+            "application_number": app_num,
             "invention_title": r.get("invention_title"),
             "filing_date": _fmt_date(r.get("filing_date")),
             "grant_date": _fmt_date(r.get("grant_date")),
-            "filing_status": first,
-            "current_status": current,
+            "prosecution_status": pros_status,
+            "post_grant_first": pg_first,
+            "post_grant_current": pg_latest or pg_first,
             "status_changed": changed,
+            "change_date": _fmt_date(pg_change),
+            "change_phase": change_phase,
         })
 
     return {
         "applicant_name": req.applicant_name,
         "expanded_names": expanded,
-        "total_patents": total,
-        "small_filed": small_count,
-        "converted": converted_count,
+        "total_patents": total_patents,
+        "total_applications": total_applications,
+        "sold_count": sold_count,
+        "prosecution": {
+            "small": pros_small,
+            "large": pros_large,
+            "micro": pros_micro,
+            "total": pros_total,
+        },
+        "post_grant": {
+            "small": pg_small,
+            "large": pg_large,
+            "micro": pg_micro,
+            "total": pg_total,
+            "stol": pg_stol,
+            "ltos": pg_ltos,
+            "stom": pg_stom,
+            "declarations": pg_declarations,
+            "converted": pg_converted,
+        },
         "results": results,
     }
 

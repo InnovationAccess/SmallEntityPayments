@@ -308,12 +308,12 @@ async function loadApplicantPortfolio() {
 
   setLoading(appBtn, true);
   appArea.classList.remove('hidden');
-  appArea.innerHTML = '<p class="text-muted">Loading...</p>';
+  appArea.innerHTML = '<p class="text-muted">Loading portfolio — searching all applicants, inventors, and assignees...</p>';
 
   try {
     const data = await apiPost('/api/entity-status/by-applicant', {
       applicant_name: name,
-      limit: 500,
+      limit: 5000,
     });
     renderApplicantPortfolio(data);
   } catch (err) {
@@ -326,58 +326,137 @@ async function loadApplicantPortfolio() {
 }
 
 function renderApplicantPortfolio(data) {
-  const convRate = data.total_patents > 0
-    ? (data.converted / data.total_patents * 100).toFixed(1) : 0;
+  const pros = data.prosecution || {};
+  const pg = data.post_grant || {};
+  const pgConvRate = pg.total > 0
+    ? (pg.converted / pg.total * 100).toFixed(1) : 0;
 
   let html = `
     <div class="card">
       <h3 class="card-title">Portfolio for ${escHtml(data.applicant_name)}</h3>
-      ${data.expanded_names.length > 1 ? `<p class="text-muted">Including ${data.expanded_names.length} name variants</p>` : ''}
+      ${data.expanded_names.length > 1
+        ? `<p class="text-muted">Including ${data.expanded_names.length} name variants (applicants, inventors, and assignees)</p>`
+        : ''}
+
+      <!-- Top-level summary -->
       <div class="cite-summary-grid">
         <div class="cite-stat">
           <span class="cite-stat-value">${data.total_patents.toLocaleString()}</span>
-          <span class="cite-stat-label">Total Patents</span>
+          <span class="cite-stat-label">Granted Patents</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.small_filed.toLocaleString()}</span>
-          <span class="cite-stat-label">Filed as Small/Micro</span>
+          <span class="cite-stat-value">${(data.total_applications - data.total_patents).toLocaleString()}</span>
+          <span class="cite-stat-label">Pending Applications</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.converted.toLocaleString()}</span>
-          <span class="cite-stat-label">Status Changed</span>
+          <span class="cite-stat-value">${data.sold_count.toLocaleString()}</span>
+          <span class="cite-stat-label">Assigned Away</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${convRate}%</span>
-          <span class="cite-stat-label">Conversion Rate</span>
+          <span class="cite-stat-value">${data.total_applications.toLocaleString()}</span>
+          <span class="cite-stat-label">Total Applications</span>
         </div>
       </div>
     </div>
 
-    <div class="results-header">
-      <strong>Patents</strong>
-      <span class="results-count">${data.results.length} shown</span>
+    <!-- Prosecution Phase -->
+    <div class="card" style="margin-top:1rem">
+      <h4 class="card-title" style="font-size:1rem">Prosecution Phase — Entity Declarations</h4>
+      <p class="text-muted" style="margin:0 0 0.5rem">From prosecution transaction codes (SMAL, BIG., MICR)</p>
+      <div class="cite-summary-grid">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pros.small.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('SMALL')} Small</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pros.micro.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('MICRO')} Micro</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pros.large.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('LARGE')} Large</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pros.total.toLocaleString()}</span>
+          <span class="cite-stat-label">Total Declarations</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Post-Grant Phase -->
+    <div class="card" style="margin-top:1rem">
+      <h4 class="card-title" style="font-size:1rem">Post-Grant Phase — Maintenance Fees</h4>
+      <p class="text-muted" style="margin:0 0 0.5rem">From maintenance fee payments, declarations, and transitions</p>
+      <div class="cite-summary-grid">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.small.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('SMALL')} First Small</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.micro.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('MICRO')} First Micro</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.large.toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('LARGE')} First Large</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.converted.toLocaleString()}</span>
+          <span class="cite-stat-label">Status Changed</span>
+        </div>
+      </div>
+      ${(pg.stol || pg.ltos || pg.stom) ? `
+      <div class="cite-summary-grid" style="margin-top:0.5rem">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.stol.toLocaleString()}</span>
+          <span class="cite-stat-label">Small→Large</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.ltos.toLocaleString()}</span>
+          <span class="cite-stat-label">Large→Small</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pg.stom.toLocaleString()}</span>
+          <span class="cite-stat-label">Small→Micro</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${pgConvRate}%</span>
+          <span class="cite-stat-label">Conversion Rate</span>
+        </div>
+      </div>` : ''}
+    </div>
+
+    <div class="results-header" style="margin-top:1rem">
+      <strong>Patent Details</strong>
+      <span class="results-count">${data.results.length.toLocaleString()} shown</span>
     </div>
     <div class="table-scroll-wrap">
       <table class="data-table" id="es-app-table">
         <thead><tr>
           <th data-sort-key="0">Patent #</th>
-          <th data-sort-key="1">Grant Date</th>
-          <th data-sort-key="2">Title</th>
-          <th data-sort-key="3">Filing Status</th>
-          <th data-sort-key="4">Current Status</th>
-          <th data-sort-key="5">Changed?</th>
+          <th data-sort-key="1">App #</th>
+          <th data-sort-key="2">Grant Date</th>
+          <th data-sort-key="3">Title</th>
+          <th data-sort-key="4">Prosecution</th>
+          <th data-sort-key="5">Post-Grant First</th>
+          <th data-sort-key="6">Post-Grant Current</th>
+          <th data-sort-key="7">Changed?</th>
         </tr></thead>
         <tbody>
   `;
 
   for (const r of data.results) {
-    const changedMark = r.status_changed ? '<span class="es-badge es-badge--changed">Yes</span>' : '';
+    const changedMark = r.status_changed
+      ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
+      : '';
     html += `<tr>
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
+      <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
       <td>${escHtml(r.invention_title || '')}</td>
-      <td>${statusBadge(r.filing_status)}</td>
-      <td>${statusBadge(r.current_status)}</td>
+      <td>${statusBadge(r.prosecution_status)}</td>
+      <td>${statusBadge(r.post_grant_first)}</td>
+      <td>${statusBadge(r.post_grant_current)}</td>
       <td>${changedMark}</td>
     </tr>`;
   }
