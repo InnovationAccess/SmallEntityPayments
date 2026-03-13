@@ -7,12 +7,15 @@ from typing import List, Tuple
 
 from fastapi import APIRouter, HTTPException, status
 
+from fastapi import Query as QueryParam
+
 from api.models.schemas import (
     Address,
     MDMAddressRequest,
     MDMAddressSearchRequest,
     MDMAssociateRequest,
     MDMDeleteRequest,
+    MDMResolveResult,
     MDMSearchRequest,
     MDMSearchResult,
 )
@@ -135,3 +138,43 @@ def search_by_address(req: MDMAddressSearchRequest) -> List[MDMSearchResult]:
     addr_dicts = [a.model_dump() for a in req.addresses]
     rows = bq_service.search_by_address(addr_dicts)
     return [MDMSearchResult(**row) for row in rows]
+
+
+@router.get("/resolve", response_model=MDMResolveResult)
+def resolve_name(name: str = QueryParam(..., description="Entity name to resolve")) -> MDMResolveResult:
+    """Resolve an entity name to its representative and all associated variants.
+
+    Checks the name_unification table. If the name has been normalized,
+    returns the representative name and all names in that group.
+    If not normalized, returns just the original name.
+    """
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="Name parameter is required.")
+
+    all_names = bq_service.expand_name_for_query(name.strip())
+    is_unified = len(all_names) > 1
+
+    # Determine the representative name (the canonical name for this group)
+    representative = None
+    if is_unified:
+        # expand_name_for_query returns associated_names; look up the representative
+        from google.cloud import bigquery as bq
+        from api.config import settings
+
+        rep_sql = f"""
+        SELECT representative_name
+        FROM `{settings.unification_table}`
+        WHERE LOWER(associated_name) = LOWER(@name)
+        LIMIT 1
+        """
+        rep_params = [bq.ScalarQueryParameter("name", "STRING", name.strip())]
+        rep_rows = bq_service.run_query(rep_sql, rep_params)
+        if rep_rows:
+            representative = rep_rows[0]["representative_name"]
+
+    return MDMResolveResult(
+        input_name=name.strip(),
+        representative_name=representative,
+        all_names=all_names,
+        is_unified=is_unified,
+    )

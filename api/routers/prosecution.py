@@ -162,6 +162,27 @@ def list_applications(req: ApplicationDrilldownRequest) -> Dict[str, Any]:
             detail="applicant_name is required",
         )
 
+    # Expand the name through name_unification (if normalized)
+    expanded = bq_service.expand_name_for_query(req.applicant_name.strip())
+
+    params = [
+        bigquery.ScalarQueryParameter("date_from", "STRING", req.date_from),
+        bigquery.ScalarQueryParameter("date_to", "STRING", req.date_to),
+        bigquery.ScalarQueryParameter("lim", "INT64", req.limit),
+    ]
+
+    # Build the applicant filter: IN clause for expanded names, LIKE for single
+    if len(expanded) > 1:
+        for i, name in enumerate(expanded):
+            params.append(bigquery.ScalarQueryParameter(f"name_{i}", "STRING", name))
+        name_in = ", ".join(f"@name_{i}" for i in range(len(expanded)))
+        applicant_filter = f"COALESCE(p.first_applicant_name, p.first_inventor_name) IN ({name_in})"
+    else:
+        params.append(bigquery.ScalarQueryParameter(
+            "applicant", "STRING", req.applicant_name.strip().upper(),
+        ))
+        applicant_filter = "UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name, '')) LIKE CONCAT('%', @applicant, '%')"
+
     sql = f"""
         WITH smal_events AS (
             SELECT
@@ -189,18 +210,10 @@ def list_applications(req: ApplicationDrilldownRequest) -> Dict[str, Any]:
         FROM smal_events s
         JOIN `{settings.patent_table}` p
             ON s.application_number = p.application_number
-        WHERE UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name, ''))
-              LIKE CONCAT('%', @applicant, '%')
+        WHERE {applicant_filter}
         ORDER BY s.smal_count DESC, s.first_smal_date ASC
         LIMIT @lim
     """
-
-    params = [
-        bigquery.ScalarQueryParameter("applicant", "STRING", req.applicant_name.strip().upper()),
-        bigquery.ScalarQueryParameter("date_from", "STRING", req.date_from),
-        bigquery.ScalarQueryParameter("date_to", "STRING", req.date_to),
-        bigquery.ScalarQueryParameter("lim", "INT64", req.limit),
-    ]
 
     rows = bq_service.run_query(sql, params)
 
@@ -222,6 +235,7 @@ def list_applications(req: ApplicationDrilldownRequest) -> Dict[str, Any]:
     return {
         "total": len(results),
         "applicant_name": req.applicant_name,
+        "expanded_names": expanded,
         "date_from": req.date_from,
         "date_to": req.date_to,
         "results": results,

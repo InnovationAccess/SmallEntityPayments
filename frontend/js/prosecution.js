@@ -7,7 +7,7 @@
  */
 
 import {
-  apiPost, setLoading, showStatus, escHtml,
+  apiGet, apiPost, setLoading, showStatus, escHtml,
   enableTableSorting, stampOriginalOrder, enableAssignmentPopup, addColumnPicker,
 } from './app.js';
 
@@ -136,12 +136,25 @@ function renderEntityResults(data) {
   });
 }
 
-function selectEntity(entityName) {
+async function selectEntity(entityName) {
   selectedEntity = entityName;
   selectedEntityEl.textContent = entityName;
   phase2Card.classList.remove('hidden');
   appResultsEl.classList.add('hidden');
   hidePhase3();
+
+  // Check if this entity name is normalized via name_unification
+  try {
+    const resolved = await apiGet(`/mdm/resolve?name=${encodeURIComponent(entityName)}`);
+    if (resolved.is_unified) {
+      selectedEntity = resolved.representative_name || entityName;
+      selectedEntityEl.innerHTML = `${escHtml(selectedEntity)} <span class="es-unified-badge">${resolved.all_names.length} name variants</span>`;
+    }
+  } catch (e) {
+    // Non-critical — proceed with original name
+    console.warn('Name resolve failed:', e);
+  }
+
   // Scroll to phase 2
   phase2Card.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -183,12 +196,15 @@ function renderApplicationResults(data) {
 
   selectedAppRows = new Set();
 
+  const expandedInfo = data.expanded_names && data.expanded_names.length > 1
+    ? `<p class="text-muted">Searching ${data.expanded_names.length} name variants</p>` : '';
   let html = `
     <div class="results-header">
       <strong>Applications for ${escHtml(data.applicant_name)}</strong>
       <span class="results-count">${data.total} applications</span>
       <span id="px-selected-count" class="results-count px-sel-count">0 selected</span>
     </div>
+    ${expandedInfo}
     <p class="px-hint">Ctrl+Click to select multiple rows, Shift+Click for range. Selected rows will be used for invoice retrieval (Phase 3).</p>
     <div class="table-scroll-wrap">
       <table class="data-table" id="px-app-table">

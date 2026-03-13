@@ -240,6 +240,7 @@ def search_conversions(req: ConversionSearchRequest) -> Dict[str, Any]:
     ]
 
     applicant_filter = ""
+    expanded = []
     if req.applicant_name:
         expanded = bq_service.expand_name_for_query(req.applicant_name)
         if len(expanded) > 1:
@@ -293,7 +294,7 @@ def search_conversions(req: ConversionSearchRequest) -> Dict[str, Any]:
             "last_status": r["last_status"],
         })
 
-    return {"total": len(results), "results": results}
+    return {"total": len(results), "results": results, "expanded_names": expanded}
 
 
 @router.post("/by-applicant")

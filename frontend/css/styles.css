@@ -1083,6 +1083,20 @@ textarea { resize: vertical; }
   flex-shrink: 0;
 }
 
+/* Name unification badge — shown next to normalized entity names */
+.es-unified-badge {
+  display: inline-block;
+  font-size: .65rem;
+  padding: .1rem .4rem;
+  border-radius: 3px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 600;
+  margin-left: .35rem;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* =====================================================================
    Prosecution Fee Investigation
    ===================================================================== */

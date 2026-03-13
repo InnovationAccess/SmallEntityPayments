@@ -65,6 +65,13 @@ class MDMAssociateRequest(BaseModel):
     associated_names: List[str] = Field(..., description="Names to associate with the representative")
 
 
+class MDMResolveResult(BaseModel):
+    input_name: str
+    representative_name: Optional[str] = None
+    all_names: List[str]
+    is_unified: bool = False
+
+
 class MDMDeleteRequest(BaseModel):
     associated_name: str = Field(..., description="The name to un-associate")
 

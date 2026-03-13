@@ -167,8 +167,12 @@ async function findNames(inputEl, suggestEl, findBtn) {
     for (const r of results) {
       const name = r.raw_name || r.name || '';
       const freq = r.frequency || 0;
-      html += `<div class="es-suggestion-item" data-name="${escHtml(name)}">
-        <span class="es-suggestion-name">${escHtml(name)}</span>
+      const rep = r.representative_name || '';
+      const badge = rep
+        ? `<span class="es-unified-badge" title="Normalized to: ${escHtml(rep)}">unified</span>`
+        : '';
+      html += `<div class="es-suggestion-item" data-name="${escHtml(name)}" data-representative="${escHtml(rep)}">
+        <span class="es-suggestion-name">${escHtml(name)}${badge}</span>
         <span class="es-suggestion-freq">${freq.toLocaleString()}</span>
       </div>`;
     }
@@ -178,7 +182,9 @@ async function findNames(inputEl, suggestEl, findBtn) {
 
     suggestEl.querySelectorAll('.es-suggestion-item').forEach(item => {
       item.addEventListener('click', () => {
-        inputEl.value = item.dataset.name;
+        // Use the representative name if this name is normalized
+        const rep = item.dataset.representative;
+        inputEl.value = rep || item.dataset.name;
         suggestEl.classList.add('hidden');
         suggestEl.innerHTML = '';
       });
@@ -235,11 +241,14 @@ async function searchConversions() {
 }
 
 function renderConversionResults(data) {
+  const expandedInfo = data.expanded_names && data.expanded_names.length > 1
+    ? `<p class="text-muted">Searching ${data.expanded_names.length} name variants</p>` : '';
   let html = `
     <div class="results-header">
       <strong>Conversion Results</strong>
       <span class="results-count">${data.total} patents</span>
     </div>
+    ${expandedInfo}
     <div class="table-scroll-wrap">
       <table class="data-table" id="es-conv-table">
         <thead><tr>
