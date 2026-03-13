@@ -9,7 +9,7 @@
 
 import {
   apiGet, apiPost, setLoading, showStatus, escHtml,
-  enableTableSorting, stampOriginalOrder, enableAssignmentPopup,
+  enableTableSorting, stampOriginalOrder, enableAssignmentPopup, addColumnPicker,
 } from './app.js';
 
 // ── DOM References ───────────────────────────────────────────────
@@ -120,6 +120,7 @@ function renderPatentTimeline(data) {
   if (tbl) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
+    addColumnPicker(tbl);
   }
 }
 
@@ -191,6 +192,7 @@ function renderConversionResults(data) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
     enableAssignmentPopup('#es-conv-table .patent-number');
+    addColumnPicker(tbl);
   }
 }
 
@@ -287,6 +289,7 @@ function renderApplicantPortfolio(data) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
     enableAssignmentPopup('#es-app-table .patent-number');
+    addColumnPicker(tbl);
   }
 }
 

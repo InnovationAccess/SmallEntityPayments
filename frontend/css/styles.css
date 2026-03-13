@@ -596,12 +596,14 @@ textarea { resize: vertical; }
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0,0,0,.15);
-  max-width: 760px;
   min-width: 400px;
-  max-height: 50vh;
+  max-width: 80vw;
+  min-height: 120px;
+  max-height: 80vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  resize: both;
 }
 .chain-popup.hidden { display: none !important; }
 .chain-header {
@@ -610,6 +612,29 @@ textarea { resize: vertical; }
   padding: .6rem .75rem;
   background: #f1f5f9;
   border-bottom: 1px solid var(--color-border);
+  cursor: grab;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+  user-select: none;
+  flex-shrink: 0;
+}
+.chain-header:active { cursor: grabbing; }
+.chain-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-muted);
+  padding: 0 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.chain-close-btn:hover {
+  background: #e5e7eb;
+  color: var(--color-danger);
 }
 .chain-loading {
   padding: .75rem;

@@ -8,7 +8,7 @@
 
 import {
   apiPost, setLoading, showStatus, escHtml,
-  enableTableSorting, stampOriginalOrder, enableAssignmentPopup,
+  enableTableSorting, stampOriginalOrder, enableAssignmentPopup, addColumnPicker,
 } from './app.js';
 
 // ── DOM References ───────────────────────────────────────────────
@@ -115,11 +115,12 @@ function renderEntityResults(data) {
   html += '</tbody></table></div>';
   entityResultsEl.innerHTML = html;
 
-  // Enable sorting
+  // Enable sorting + column picker
   const tbl = document.getElementById('px-entity-table');
   if (tbl) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
+    addColumnPicker(tbl);
   }
 
   // Click-to-select entity
@@ -222,12 +223,13 @@ function renderApplicationResults(data) {
   html += '</tbody></table></div>';
   appResultsEl.innerHTML = html;
 
-  // Enable sorting + assignment popup
+  // Enable sorting + assignment popup + column picker
   const tbl = document.getElementById('px-app-table');
   if (tbl) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
     enableAssignmentPopup('#px-app-table .patent-number');
+    addColumnPicker(tbl);
   }
 
   // Ctrl+Click multi-select
@@ -380,11 +382,12 @@ function renderDocumentResults(data) {
   html += '</tbody></table></div>';
   docResultsEl.innerHTML = html;
 
-  // Enable sorting
+  // Enable sorting + column picker
   const tbl = document.getElementById('px-doc-table');
   if (tbl) {
     stampOriginalOrder(tbl);
     enableTableSorting(tbl);
+    addColumnPicker(tbl);
   }
 
   // Show extract controls

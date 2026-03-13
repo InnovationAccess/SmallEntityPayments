@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=8" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=9" />
 </head>
 <body>
 
@@ -33,7 +33,8 @@
     <section id="tab-mdm" class="tab-panel active" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">MDM – Entity Name Normalization</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use MDM Name Normalization</h4>
@@ -104,7 +105,8 @@
     <section id="tab-query-builder" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">Boolean Query Builder</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use the Query Builder</h4>
@@ -167,7 +169,8 @@
     <section id="tab-ai-assistant" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">AI Assistant – Natural Language Query</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use the AI Assistant</h4>
@@ -214,7 +217,8 @@
     <section id="tab-citations" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">Forward Citation Lookup</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use Forward Citation Lookup</h4>
@@ -306,7 +310,8 @@
     <section id="tab-entity-status" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">Entity Status Analytics</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use Entity Status Analytics</h4>
@@ -406,7 +411,8 @@
     <section id="tab-prosecution" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">Prosecution Fee Investigation</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Use Prosecution Fee Investigation</h4>
@@ -523,7 +529,8 @@
     <section id="tab-etl-log" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
         <h2 class="panel-title">Data Update Log</h2>
-        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab">?</button>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
         <h4>How to Read the Update Log</h4>
@@ -650,13 +657,13 @@
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
 
-  <script src="/static/js/app.js?v=12"          type="module"></script>
+  <script src="/static/js/app.js?v=13"          type="module"></script>
   <script src="/static/js/mdm.js?v=8"           type="module"></script>
   <script src="/static/js/query_builder.js?v=8" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
-  <script src="/static/js/citations.js?v=4"    type="module"></script>
-  <script src="/static/js/entity_status.js?v=1" type="module"></script>
-  <script src="/static/js/prosecution.js?v=2" type="module"></script>
-  <script src="/static/js/etl_log.js?v=2"    type="module"></script>
+  <script src="/static/js/citations.js?v=5"    type="module"></script>
+  <script src="/static/js/entity_status.js?v=2" type="module"></script>
+  <script src="/static/js/prosecution.js?v=3" type="module"></script>
+  <script src="/static/js/etl_log.js?v=3"    type="module"></script>
 </body>
 </html>

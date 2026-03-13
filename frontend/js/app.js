@@ -21,17 +21,6 @@ tabBtns.forEach(btn => {
   });
 });
 
-// ---- Help toggle buttons (event delegation) --------------------------------
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.help-toggle-btn');
-  if (!btn) return;
-  const panel = btn.closest('.panel-title-row')?.nextElementSibling;
-  if (panel && panel.classList.contains('help-panel')) {
-    panel.classList.toggle('hidden');
-    btn.classList.toggle('active');
-  }
-});
-
 // ---- Shared helpers -------------------------------------------------------
 
 /**
@@ -361,22 +350,140 @@ export function buildInteractiveTable(container, rows) {
   }
 }
 
-// ---- Assignment chain popup -----------------------------------------------
+/**
+ * Add a column-visibility dropdown to an existing static table.
+ * Place it right above the table's scroll wrapper.
+ *
+ * @param {HTMLTableElement} tableEl  – the <table> element
+ * @param {Object} [opts]
+ * @param {string[]} [opts.defaultHidden] – column header text to hide by default
+ */
+export function addColumnPicker(tableEl, opts = {}) {
+  if (!tableEl) return;
+  const thead = tableEl.querySelector('thead');
+  if (!thead) return;
+
+  const ths = Array.from(thead.querySelectorAll('th'));
+  if (ths.length === 0) return;
+
+  // Don't add a picker twice
+  const parentWrap = tableEl.closest('.table-scroll-wrap') || tableEl.parentElement;
+  if (parentWrap.previousElementSibling?.classList.contains('table-toolbar')) return;
+
+  const defaultHidden = new Set((opts.defaultHidden || []).map(s => s.toLowerCase()));
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'table-toolbar';
+
+  const pickerWrap = document.createElement('div');
+  pickerWrap.className = 'col-picker-wrap';
+
+  const pickerBtn = document.createElement('button');
+  pickerBtn.className = 'btn btn-secondary col-picker-btn';
+  pickerBtn.textContent = 'Columns \u25BE';
+
+  const pickerMenu = document.createElement('div');
+  pickerMenu.className = 'col-picker-menu hidden';
+
+  ths.forEach((th, idx) => {
+    const label = th.textContent.trim();
+    if (!label) return; // skip icon-only columns
+
+    const lbl = document.createElement('label');
+    lbl.className = 'col-picker-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    const isHidden = defaultHidden.has(label.toLowerCase());
+    cb.checked = !isHidden;
+
+    cb.addEventListener('change', () => {
+      toggleStaticCol(tableEl, idx, cb.checked);
+    });
+
+    lbl.appendChild(cb);
+    lbl.appendChild(document.createTextNode(' ' + label));
+    pickerMenu.appendChild(lbl);
+
+    // Apply default hidden
+    if (isHidden) toggleStaticCol(tableEl, idx, false);
+  });
+
+  pickerBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    document.querySelectorAll('.col-picker-menu').forEach(m => m.classList.add('hidden'));
+    pickerMenu.classList.toggle('hidden');
+  });
+  pickerMenu.addEventListener('click', e => e.stopPropagation());
+
+  pickerWrap.appendChild(pickerBtn);
+  pickerWrap.appendChild(pickerMenu);
+  toolbar.appendChild(pickerWrap);
+
+  parentWrap.parentElement.insertBefore(toolbar, parentWrap);
+
+  // Close on outside click
+  if (!window._colPickerGlobalHandler) {
+    document.addEventListener('click', () => {
+      document.querySelectorAll('.col-picker-menu').forEach(m => m.classList.add('hidden'));
+    });
+    window._colPickerGlobalHandler = true;
+  }
+}
+
+function toggleStaticCol(tableEl, colIdx, show) {
+  const displayVal = show ? '' : 'none';
+  // Header
+  const ths = tableEl.querySelectorAll('thead th');
+  if (ths[colIdx]) ths[colIdx].style.display = displayVal;
+  // Body rows
+  tableEl.querySelectorAll('tbody tr').forEach(tr => {
+    if (tr.cells[colIdx]) tr.cells[colIdx].style.display = displayVal;
+  });
+}
+
+// ---- Assignment chain popup (draggable + resizable) -----------------------
 
 const _chainCache = {};   // patent_number -> { assignments: [...] }
 let _chainPopup = null;   // the single popup element
 let _chainHideTimer = null;
 let _chainShowTimer = null;
+let _chainDrag = null;    // drag state
 
 function getOrCreatePopup() {
   if (_chainPopup) return _chainPopup;
   const el = document.createElement('div');
   el.id = 'assignment-chain-popup';
   el.className = 'chain-popup hidden';
+  // Keep popup open while mouse is inside it
   el.addEventListener('mouseenter', () => clearTimeout(_chainHideTimer));
   el.addEventListener('mouseleave', () => hideChainPopup());
   document.body.appendChild(el);
   _chainPopup = el;
+
+  // ---- Drag support on the header ----
+  el.addEventListener('mousedown', e => {
+    const header = e.target.closest('.chain-header');
+    if (!header || e.target.closest('.chain-close-btn')) return;
+    e.preventDefault();
+    _chainDrag = {
+      startX: e.clientX,
+      startY: e.clientY,
+      origLeft: el.offsetLeft,
+      origTop: el.offsetTop,
+    };
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!_chainDrag) return;
+    e.preventDefault();
+    const dx = e.clientX - _chainDrag.startX;
+    const dy = e.clientY - _chainDrag.startY;
+    el.style.left = `${_chainDrag.origLeft + dx}px`;
+    el.style.top  = `${_chainDrag.origTop  + dy}px`;
+  });
+
+  document.addEventListener('mouseup', () => { _chainDrag = null; });
+
   return el;
 }
 
@@ -388,6 +495,13 @@ function hideChainPopup() {
   }, 200);
 }
 
+function closeChainPopup() {
+  clearTimeout(_chainShowTimer);
+  clearTimeout(_chainHideTimer);
+  const popup = getOrCreatePopup();
+  popup.classList.add('hidden');
+}
+
 async function showChainPopup(patentNum, anchorEl) {
   clearTimeout(_chainHideTimer);
   clearTimeout(_chainShowTimer);
@@ -397,27 +511,29 @@ async function showChainPopup(patentNum, anchorEl) {
     const popup = getOrCreatePopup();
 
     // Position to the right of the anchor, aligned to its top.
-    // If the popup would overflow the viewport bottom, shift it up.
     const rect = anchorEl.getBoundingClientRect();
     const vpH = window.innerHeight;
-    const popupH = 300; // estimated max height for initial placement
+    const vpW = window.innerWidth;
+    const popupH = 300;
 
     let top = rect.top + window.scrollY;
-    // If placing at anchor-top would push the popup off-screen, shift up
     if (rect.top + popupH > vpH) {
       top = Math.max(window.scrollY + 8, rect.bottom + window.scrollY - popupH);
     }
     popup.style.top = `${top}px`;
     popup.style.left = `${rect.right + window.scrollX + 8}px`;
 
-    // If the popup would go off the right edge, flip it to the left side
-    const vpW = window.innerWidth;
     if (rect.right + 8 + 500 > vpW) {
       popup.style.left = `${Math.max(8, rect.left + window.scrollX - 510)}px`;
     }
 
-    popup.innerHTML = '<div class="chain-loading">Loading assignments\u2026</div>';
+    // Reset any user resize so it fits content naturally for new patent
+    popup.style.width = '';
+    popup.style.height = '';
+
+    popup.innerHTML = '<div class="chain-header"><span>Loading\u2026</span><button class="chain-close-btn" title="Close">\u00D7</button></div><div class="chain-loading">Loading assignments\u2026</div>';
     popup.classList.remove('hidden');
+    popup.querySelector('.chain-close-btn').addEventListener('click', closeChainPopup);
 
     // Fetch (cached)
     if (!_chainCache[patentNum]) {
@@ -425,20 +541,22 @@ async function showChainPopup(patentNum, anchorEl) {
         const data = await apiGet(`/api/assignments/${encodeURIComponent(patentNum)}/chain`);
         _chainCache[patentNum] = data;
       } catch (err) {
-        popup.innerHTML = `<div class="chain-loading">Error: ${escHtml(err.message)}</div>`;
+        popup.innerHTML = `<div class="chain-header"><span>Error</span><button class="chain-close-btn" title="Close">\u00D7</button></div><div class="chain-loading">Error: ${escHtml(err.message)}</div>`;
+        popup.querySelector('.chain-close-btn').addEventListener('click', closeChainPopup);
         return;
       }
     }
 
     const chain = _chainCache[patentNum].assignments || [];
     if (chain.length === 0) {
-      popup.innerHTML = '<div class="chain-loading">No assignment records found.</div>';
+      popup.innerHTML = `<div class="chain-header"><span>Patent ${escHtml(patentNum)}</span><button class="chain-close-btn" title="Close">\u00D7</button></div><div class="chain-loading">No assignment records found.</div>`;
+      popup.querySelector('.chain-close-btn').addEventListener('click', closeChainPopup);
       return;
     }
 
     const rows = chain.map(a =>
       `<tr>
-        <td class="chain-td-date">${escHtml(a.execution_date || '—')}</td>
+        <td class="chain-td-date">${escHtml(a.execution_date || '\u2014')}</td>
         <td>${escHtml(a.assignor)}</td>
         <td>${escHtml(a.conveyance)}</td>
         <td>${escHtml(a.assignee)}</td>
@@ -446,7 +564,10 @@ async function showChainPopup(patentNum, anchorEl) {
     ).join('');
 
     popup.innerHTML = `
-      <div class="chain-header">Assignment Chain — Patent ${escHtml(patentNum)}</div>
+      <div class="chain-header">
+        <span>Assignment Chain \u2014 Patent ${escHtml(patentNum)}</span>
+        <button class="chain-close-btn" title="Close">\u00D7</button>
+      </div>
       <div class="chain-table-wrap">
         <table class="chain-table">
           <thead><tr>
@@ -455,6 +576,7 @@ async function showChainPopup(patentNum, anchorEl) {
           <tbody>${rows}</tbody>
         </table>
       </div>`;
+    popup.querySelector('.chain-close-btn').addEventListener('click', closeChainPopup);
   }, 300);
 }
 

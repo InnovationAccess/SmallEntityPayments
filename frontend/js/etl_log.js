@@ -5,7 +5,7 @@
  * pipeline run history and per-source status.
  */
 
-import { apiGet, showStatus, escHtml, enableTableSorting, stampOriginalOrder } from './app.js';
+import { apiGet, showStatus, escHtml, enableTableSorting, stampOriginalOrder, addColumnPicker } from './app.js';
 
 const summaryGrid = document.getElementById('etl-summary-grid');
 const etlTable    = document.getElementById('etl-log-table');
@@ -87,6 +87,7 @@ async function loadLog() {
       </tr>`;
     }).join('');
     stampOriginalOrder(etlTable);
+    addColumnPicker(etlTable);
 
   } catch (err) {
     showStatus(statusEl, `Error loading update log: ${err.message}`, 'error');
