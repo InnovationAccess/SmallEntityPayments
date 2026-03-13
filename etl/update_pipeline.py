@@ -441,6 +441,12 @@ def update_ptfwpre(work_dir: str) -> dict:
               f"applicants={counts.get('applicants',0):,}, "
               f"inventors={counts.get('inventors',0):,}", file=sys.stderr)
 
+        # Free tmpfs memory immediately — the ZIP is no longer needed after parsing
+        if os.path.exists(tmp_path):
+            zip_size_gb = os.path.getsize(tmp_path) / 1024 / 1024 / 1024
+            os.unlink(tmp_path)
+            print(f"  Deleted ZIP ({zip_size_gb:.1f} GB) to free tmpfs memory", file=sys.stderr)
+
         # All 14 PTFWPRE tables — truncate before reload (full replacement)
         PTFWPRE_TABLES = [
             "patent_file_wrapper_v2",
@@ -487,6 +493,9 @@ def update_ptfwpre(work_dir: str) -> dict:
         for pattern, table in PTFWPRE_FILE_MAP:
             for fpath in sorted(glob.glob(os.path.join(work_dir, pattern))):
                 upload_and_load(fpath, "v2/ptfwpre", table)
+                # Delete local file after upload to free tmpfs memory
+                if os.path.exists(fpath):
+                    os.unlink(fpath)
 
         with open(marker, "w") as m:
             m.write(f"done\n")
