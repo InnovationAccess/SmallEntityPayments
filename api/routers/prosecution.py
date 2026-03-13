@@ -399,7 +399,7 @@ def download_documents(req: DocumentDownloadRequest) -> Dict[str, Any]:
     downloaded: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
 
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(timeout=60, follow_redirects=True) as client:
         for doc in req.documents:
             app_num = doc.get("app_number", "unknown")
             download_url = doc.get("download_url")
