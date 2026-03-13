@@ -25,6 +25,10 @@ const convLimit       = document.getElementById('es-conv-limit');
 const convBtn         = document.getElementById('es-conv-btn');
 const appInput        = document.getElementById('es-app-input');
 const appBtn          = document.getElementById('es-app-btn');
+const convApplicantFind = document.getElementById('es-applicant-find');
+const convApplicantSugg = document.getElementById('es-applicant-suggestions');
+const appFindBtn      = document.getElementById('es-app-find');
+const appSuggestions   = document.getElementById('es-app-suggestions');
 const summaryArea     = document.getElementById('es-summary');
 const patentArea      = document.getElementById('es-patent-results');
 const convArea        = document.getElementById('es-conv-results');
@@ -124,11 +128,89 @@ function renderPatentTimeline(data) {
   }
 }
 
+// ── Boolean Name Search ──────────────────────────────────────────
+
+/** Returns true if the text contains boolean operators (+, -, *). */
+function isBooleanQuery(text) {
+  return /[+\-*]/.test(text);
+}
+
+/**
+ * Search for entity names via the MDM boolean search endpoint.
+ * Renders matching names as a clickable list below the input.
+ */
+async function findNames(inputEl, suggestEl, findBtn) {
+  const query = inputEl.value.trim();
+  if (!query) {
+    showStatus(statusMsg, 'Enter a search expression (e.g. +elect* +telecom*)', 'error');
+    return;
+  }
+
+  setLoading(findBtn, true);
+  suggestEl.innerHTML = '';
+  suggestEl.classList.add('hidden');
+
+  try {
+    const results = await apiPost('/mdm/search', { query });
+
+    if (!results || results.length === 0) {
+      suggestEl.innerHTML = '<div class="es-suggestion-header">No matching names found</div>';
+      suggestEl.classList.remove('hidden');
+      return;
+    }
+
+    let html = `<div class="es-suggestion-header">
+      <span>${results.length} matching name(s)</span>
+      <span>Click to select</span>
+    </div>`;
+
+    for (const r of results) {
+      const name = r.raw_name || r.name || '';
+      const freq = r.frequency || 0;
+      html += `<div class="es-suggestion-item" data-name="${escHtml(name)}">
+        <span class="es-suggestion-name">${escHtml(name)}</span>
+        <span class="es-suggestion-freq">${freq.toLocaleString()}</span>
+      </div>`;
+    }
+
+    suggestEl.innerHTML = html;
+    suggestEl.classList.remove('hidden');
+
+    suggestEl.querySelectorAll('.es-suggestion-item').forEach(item => {
+      item.addEventListener('click', () => {
+        inputEl.value = item.dataset.name;
+        suggestEl.classList.add('hidden');
+        suggestEl.innerHTML = '';
+      });
+    });
+  } catch (err) {
+    showStatus(statusMsg, err.message, 'error');
+  } finally {
+    setLoading(findBtn, false);
+  }
+}
+
+// Wire up Find buttons
+convApplicantFind.addEventListener('click', () => {
+  findNames(convApplicant, convApplicantSugg, convApplicantFind);
+});
+convApplicant.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    findNames(convApplicant, convApplicantSugg, convApplicantFind);
+  }
+});
+
+appFindBtn.addEventListener('click', () => {
+  findNames(appInput, appSuggestions, appFindBtn);
+});
+
 // ── Conversion Search ────────────────────────────────────────────
 
 convBtn.addEventListener('click', () => searchConversions());
 
 async function searchConversions() {
+  convApplicantSugg.classList.add('hidden');
   setLoading(convBtn, true);
   convArea.classList.remove('hidden');
   convArea.innerHTML = '<p class="text-muted">Searching...</p>';
@@ -199,9 +281,19 @@ function renderConversionResults(data) {
 // ── Applicant Portfolio ──────────────────────────────────────────
 
 appBtn.addEventListener('click', () => loadApplicantPortfolio());
-appInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadApplicantPortfolio(); });
+appInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    if (isBooleanQuery(appInput.value)) {
+      e.preventDefault();
+      findNames(appInput, appSuggestions, appFindBtn);
+    } else {
+      loadApplicantPortfolio();
+    }
+  }
+});
 
 async function loadApplicantPortfolio() {
+  appSuggestions.classList.add('hidden');
   const name = appInput.value.trim();
   if (!name) return;
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=9" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=10" />
 </head>
 <body>
 
@@ -327,6 +327,7 @@
           </li>
           <li><strong>Applicant Portfolio</strong> — Enter an applicant name to see their complete entity status breakdown: how many patents filed as small vs. large, conversion rates, and trends over time.</li>
         </ol>
+        <p><strong>Boolean name search:</strong> Use <code>+term*</code> syntax in applicant fields, then click <strong>Find</strong> to search for matching names. Example: <code>+elect* +telecom*</code> finds names containing both "elect" and "telecom". Use <code>-term*</code> to exclude.</p>
         <p><strong>Event codes:</strong> SMAL = Small Entity declaration, BIG. = Large Entity declaration, MICR = Micro Entity declaration.</p>
       </div>
       <p class="panel-desc">
@@ -379,9 +380,13 @@
             <label for="es-year-end">Grant Year To</label>
             <input id="es-year-end" type="number" value="2025" min="1990" max="2026" />
           </div>
-          <div class="form-group">
-            <label for="es-applicant">Applicant (optional)</label>
-            <input id="es-applicant" type="text" placeholder="e.g. QUALCOMM" />
+          <div class="form-group" style="grid-column: 1 / -1;">
+            <label for="es-applicant">Applicant (optional) &mdash; <span style="font-weight:normal;color:var(--color-muted);">use +term* for boolean search, then click Find</span></label>
+            <div class="es-name-search-row">
+              <input id="es-applicant" type="text" placeholder="e.g. QUALCOMM or +elect* +telecom*" />
+              <button id="es-applicant-find" class="btn btn-secondary" type="button">Find</button>
+            </div>
+            <div id="es-applicant-suggestions" class="es-suggestion-list hidden"></div>
           </div>
           <div class="form-group">
             <label for="es-conv-limit">Max Results</label>
@@ -395,12 +400,14 @@
       <!-- Applicant portfolio -->
       <div class="card">
         <h3 class="card-title">Applicant Portfolio</h3>
-        <p class="card-desc">View entity status breakdown for all patents filed by a specific applicant.</p>
-        <div class="mdm-search-row">
+        <p class="card-desc">View entity status breakdown for all patents filed by a specific applicant. Use +term* for boolean search, then click Find.</p>
+        <div class="es-name-search-row">
           <input id="es-app-input" type="text"
-                 placeholder="e.g. QUALCOMM or APPLE" />
+                 placeholder="e.g. QUALCOMM or +elect* +telecom*" />
+          <button id="es-app-find" class="btn btn-secondary" type="button">Find</button>
           <button id="es-app-btn" class="btn btn-primary">Analyze Portfolio</button>
         </div>
+        <div id="es-app-suggestions" class="es-suggestion-list hidden"></div>
       </div>
       <div id="es-app-results" class="results-area hidden"></div>
 
@@ -662,7 +669,7 @@
   <script src="/static/js/query_builder.js?v=8" type="module"></script>
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
   <script src="/static/js/citations.js?v=5"    type="module"></script>
-  <script src="/static/js/entity_status.js?v=2" type="module"></script>
+  <script src="/static/js/entity_status.js?v=3" type="module"></script>
   <script src="/static/js/prosecution.js?v=3" type="module"></script>
   <script src="/static/js/etl_log.js?v=3"    type="module"></script>
 </body>

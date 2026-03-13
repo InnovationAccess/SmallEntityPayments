@@ -1028,6 +1028,61 @@ textarea { resize: vertical; }
   margin-bottom: .5rem;
 }
 
+/* Boolean name search for Entity Status */
+.es-name-search-row {
+  display: flex;
+  gap: .5rem;
+  align-items: flex-end;
+}
+.es-name-search-row input { flex: 1; }
+
+.es-suggestion-list {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: .25rem;
+  box-shadow: var(--shadow);
+}
+.es-suggestion-list.hidden { display: none !important; }
+
+.es-suggestion-header {
+  padding: .35rem .75rem;
+  font-size: .78rem;
+  color: var(--color-muted);
+  background: #f9fafb;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+}
+.es-suggestion-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: .45rem .75rem;
+  font-size: .85rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+}
+.es-suggestion-item:last-child { border-bottom: none; }
+.es-suggestion-item:hover { background: #eef2ff; }
+
+.es-suggestion-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: .75rem;
+}
+.es-suggestion-freq {
+  font-weight: 600;
+  color: var(--color-primary);
+  font-size: .78rem;
+  flex-shrink: 0;
+}
+
 /* =====================================================================
    Prosecution Fee Investigation
    ===================================================================== */
