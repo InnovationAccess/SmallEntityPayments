@@ -38,14 +38,31 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
         bigquery.ScalarQueryParameter("id", "STRING", normalized),
     ]
 
-    # Resolve input to application_number(s) via documents table,
-    # then join through reel_frame to get assignment details.
+    # Resolve input to application_number(s) first to avoid collisions
+    # between patent numbers and application numbers.
+    # E.g. patent 11172434 (ETRI) vs application 11/172,434 (Stryker).
+    # Step 1: resolve patent_number → application_number via file wrapper
+    # Step 2: find assignment reel_frames for that application_number
+    # Step 3: fall back to direct patent_number match if no file wrapper record
     sql = f"""
-    WITH matching_docs AS (
+    WITH resolved_app AS (
+      SELECT DISTINCT application_number
+      FROM `{settings.patent_table}`
+      WHERE patent_number = @id
+    ),
+    matching_docs AS (
+      -- Primary: match by resolved application_number from file wrapper
       SELECT DISTINCT reel_frame
-      FROM `{settings.assign_documents_table}`
-      WHERE application_number = @id
-         OR patent_number = @id
+      FROM `{settings.assign_documents_table}` d
+      WHERE d.application_number IN (SELECT application_number FROM resolved_app)
+
+      UNION DISTINCT
+
+      -- Fallback: direct patent_number match in assignment documents
+      -- (covers cases where file wrapper has no record for this patent)
+      SELECT DISTINCT reel_frame
+      FROM `{settings.assign_documents_table}` d
+      WHERE d.patent_number = @id
     )
     SELECT
       ao.assignor_execution_date,
