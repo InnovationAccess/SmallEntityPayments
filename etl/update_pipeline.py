@@ -83,7 +83,7 @@ def bq_query(sql: str, timeout: int = 600) -> str:
         "bq", "query",
         f"--project_id={GCP_PROJECT}",
         f"--location={BQ_LOCATION}",
-        "--nouse_legacy_sql",
+        "--use_legacy_sql=false",
         sql,
     ], timeout=timeout)
     return result.stdout
