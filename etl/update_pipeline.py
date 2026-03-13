@@ -437,18 +437,54 @@ def update_ptfwpre(work_dir: str) -> dict:
         total_rows = sum(counts.values())
         print(f"  Parsed: biblio={counts.get('biblio',0):,}, "
               f"txn={counts.get('transactions',0):,}, "
-              f"continuity={counts.get('continuity',0):,}", file=sys.stderr)
+              f"continuity={counts.get('continuity',0):,}, "
+              f"applicants={counts.get('applicants',0):,}, "
+              f"inventors={counts.get('inventors',0):,}", file=sys.stderr)
 
-        for table in ["patent_file_wrapper_v2", "pfw_transactions", "pfw_continuity"]:
+        # All 14 PTFWPRE tables — truncate before reload (full replacement)
+        PTFWPRE_TABLES = [
+            "patent_file_wrapper_v2",
+            "pfw_transactions",
+            "pfw_continuity",
+            "pfw_applicants",
+            "pfw_inventors",
+            "pfw_child_continuity",
+            "pfw_foreign_priority",
+            "pfw_publications",
+            "pfw_patent_term_adjustment",
+            "pfw_pta_history",
+            "pfw_correspondence_address",
+            "pfw_attorneys",
+            "pfw_document_metadata",
+            "pfw_embedded_assignments",
+        ]
+        for table in PTFWPRE_TABLES:
             print(f"  Truncating {table}...", file=sys.stderr)
-            bq_query(f"TRUNCATE TABLE `{BQ_DATASET}.{table}`")
+            try:
+                bq_query(f"TRUNCATE TABLE `{BQ_DATASET}.{table}`")
+            except Exception as e:
+                # Table may not exist yet on first run — skip truncation
+                print(f"    Warning: Could not truncate {table}: {e}", file=sys.stderr)
 
+        # All 14 output file patterns → BQ table mappings
         import glob
-        for pattern, table in [
+        PTFWPRE_FILE_MAP = [
             ("pfw_biblio_*.jsonl.gz", "patent_file_wrapper_v2"),
             ("pfw_transactions_*.jsonl.gz", "pfw_transactions"),
             ("pfw_continuity_*.jsonl.gz", "pfw_continuity"),
-        ]:
+            ("pfw_applicants_*.jsonl.gz", "pfw_applicants"),
+            ("pfw_inventors_*.jsonl.gz", "pfw_inventors"),
+            ("pfw_child_cont_*.jsonl.gz", "pfw_child_continuity"),
+            ("pfw_foreign_priority_*.jsonl.gz", "pfw_foreign_priority"),
+            ("pfw_publications_*.jsonl.gz", "pfw_publications"),
+            ("pfw_pta_summary_*.jsonl.gz", "pfw_patent_term_adjustment"),
+            ("pfw_pta_history_*.jsonl.gz", "pfw_pta_history"),
+            ("pfw_correspondence_*.jsonl.gz", "pfw_correspondence_address"),
+            ("pfw_attorneys_*.jsonl.gz", "pfw_attorneys"),
+            ("pfw_doc_metadata_*.jsonl.gz", "pfw_document_metadata"),
+            ("pfw_embedded_assign_*.jsonl.gz", "pfw_embedded_assignments"),
+        ]
+        for pattern, table in PTFWPRE_FILE_MAP:
             for fpath in sorted(glob.glob(os.path.join(work_dir, pattern))):
                 upload_and_load(fpath, "v2/ptfwpre", table)
 
@@ -482,6 +518,7 @@ def rebuild_entity_names():
     CLUSTER BY entity_name
     AS
     WITH all_names AS (
+      -- First applicant/inventor from biblio table
       SELECT first_applicant_name AS entity_name
       FROM `{BQ_DATASET}.patent_file_wrapper_v2`
       WHERE first_applicant_name IS NOT NULL
@@ -491,6 +528,17 @@ def rebuild_entity_names():
       WHERE first_inventor_name IS NOT NULL
         AND first_inventor_name != first_applicant_name
       UNION ALL
+      -- ALL applicants from pfw_applicants (includes 2nd, 3rd, etc.)
+      SELECT applicant_name AS entity_name
+      FROM `{BQ_DATASET}.pfw_applicants`
+      WHERE applicant_name IS NOT NULL
+      UNION ALL
+      -- ALL inventors from pfw_inventors (includes 2nd, 3rd, etc.)
+      SELECT inventor_name AS entity_name
+      FROM `{BQ_DATASET}.pfw_inventors`
+      WHERE inventor_name IS NOT NULL
+      UNION ALL
+      -- Assignment parties
       SELECT assignee_name AS entity_name
       FROM `{BQ_DATASET}.pat_assign_assignees`
       WHERE assignee_name IS NOT NULL

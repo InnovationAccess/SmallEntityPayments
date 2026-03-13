@@ -60,5 +60,49 @@ class Settings:
     def pfw_continuity_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_continuity"
 
+    @property
+    def pfw_applicants_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_applicants"
+
+    @property
+    def pfw_inventors_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_inventors"
+
+    @property
+    def pfw_child_continuity_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_child_continuity"
+
+    @property
+    def pfw_foreign_priority_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_foreign_priority"
+
+    @property
+    def pfw_publications_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_publications"
+
+    @property
+    def pfw_pta_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_patent_term_adjustment"
+
+    @property
+    def pfw_pta_history_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_pta_history"
+
+    @property
+    def pfw_correspondence_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_correspondence_address"
+
+    @property
+    def pfw_attorneys_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_attorneys"
+
+    @property
+    def pfw_document_metadata_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_document_metadata"
+
+    @property
+    def pfw_embedded_assignments_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_embedded_assignments"
+
 
 settings = Settings()

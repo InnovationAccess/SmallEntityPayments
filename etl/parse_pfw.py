@@ -2,20 +2,26 @@
 """Parse USPTO ODP Patent File Wrapper (PFW/PTFWPRE) JSON into JSONL for BigQuery.
 
 Streams large JSON files from ZIP archives using ijson, extracting patent
-application records. Outputs THREE gzipped JSONL files:
-  1. pfw_biblio.jsonl.gz     — patent_file_wrapper_v2 rows (one per application)
-  2. pfw_transactions.jsonl.gz — pfw_transactions rows (one per event per application)
-  3. pfw_continuity.jsonl.gz  — pfw_continuity rows (if continuity data present)
+application records. Outputs 14 gzipped JSONL files covering ALL fields
+in the PTFWPRE schema:
+
+  1.  pfw_biblio         → patent_file_wrapper_v2  (one per application)
+  2.  pfw_transactions   → pfw_transactions        (one per event)
+  3.  pfw_continuity     → pfw_continuity           (parent continuity)
+  4.  pfw_applicants     → pfw_applicants            (all applicants)
+  5.  pfw_inventors      → pfw_inventors             (all inventors)
+  6.  pfw_child_cont     → pfw_child_continuity      (child continuity)
+  7.  pfw_foreign_priority → pfw_foreign_priority    (foreign priority claims)
+  8.  pfw_publications   → pfw_publications          (publication metadata)
+  9.  pfw_pta_summary    → pfw_patent_term_adjustment (PTA summary)
+  10. pfw_pta_history    → pfw_pta_history            (PTA event history)
+  11. pfw_correspondence → pfw_correspondence_address (app-level address)
+  12. pfw_attorneys      → pfw_attorneys              (attorneys of record)
+  13. pfw_doc_metadata   → pfw_document_metadata      (pgpub/grant doc metadata)
+  14. pfw_embedded_assign → pfw_embedded_assignments  (embedded assignment chain)
 
 Usage:
     python parse_pfw.py <input.zip> <output_dir> [min_year]
-
-The ZIP contains one JSON file per year (e.g. 2026.json, 2025.json).
-Each JSON file has structure:
-    {
-      "count": N,
-      "patentFileWrapperDataBag": [ ...records... ]
-    }
 """
 
 import gzip
@@ -39,14 +45,6 @@ ENTITY_STATUS_MAP = {
     "regular undiscounted": "Large",
 }
 
-# Map citation categories
-CATEGORY_MAP = {
-    "cited by examiner": "examiner",
-    "cited by applicant": "applicant",
-    "cited by third party": "third_party",
-    "imported from a related application": "related",
-}
-
 
 def map_entity_status(raw: str) -> str:
     """Convert PFW businessEntityStatusCategory to canonical form."""
@@ -58,14 +56,74 @@ def parse_date(s: str) -> str | None:
     if not s or not s.strip():
         return None
     d = s.strip()
-    # Validate basic format
     if len(d) >= 8 and d.replace("-", "").isdigit():
-        # Reject obviously invalid dates (0000-00-00 etc.)
         digits = d.replace("-", "")
         if digits[:4] == "0000" or digits[4:6] == "00" or digits[6:8] == "00":
             return None
-        return d  # Already ISO or yyyymmdd
+        return d
     return None
+
+
+def _str(val) -> str | None:
+    """Safely extract a stripped string or None."""
+    return (val or "").strip() or None if isinstance(val, str) else (str(val).strip() or None if val is not None else None)
+
+
+def _int(val) -> int | None:
+    """Safely extract an integer or None."""
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _extract_person_address(person: dict, name_key: str) -> dict:
+    """Extract name parts + first correspondence address from an applicant/inventor bag entry.
+
+    Both applicantBag and inventorBag have identical sub-structure for names and addresses.
+    name_key is 'applicantNameText' for applicants, 'inventorNameText' for inventors.
+    """
+    addr = {}
+    addr_bag = person.get("correspondenceAddressBag") or []
+    if addr_bag:
+        a = addr_bag[0]
+        addr = {
+            "address_name_line_1": _str(a.get("nameLineOneText")),
+            "address_name_line_2": _str(a.get("nameLineTwoText")),
+            "address_city": _str(a.get("cityName")),
+            "address_region": _str(a.get("geographicRegionName")),
+            "address_region_code": _str(a.get("geographicRegionCode")),
+            "address_country_code": _str(a.get("countryCode")),
+            "address_country_name": _str(a.get("countryName")),
+        }
+    else:
+        addr = {
+            "address_name_line_1": None,
+            "address_name_line_2": None,
+            "address_city": None,
+            "address_region": None,
+            "address_region_code": None,
+            "address_country_code": None,
+            "address_country_name": None,
+        }
+
+    return {
+        name_key.replace("Text", "").replace("applicantName", "applicant_name").replace("inventorName", "inventor_name"):
+            _str(person.get(name_key)),
+        "first_name": _str(person.get("firstName")),
+        "middle_name": _str(person.get("middleName")),
+        "last_name": _str(person.get("lastName")),
+        "name_prefix": _str(person.get("namePrefix")),
+        "name_suffix": _str(person.get("nameSuffix")),
+        "preferred_name": _str(person.get("preferredName")),
+        "country_code": _str(person.get("countryCode")),
+        **addr,
+    }
+
+
+# ─── Extraction Functions ─────────────────────────────────────────
 
 
 def parse_biblio(record: dict, source_file: str) -> dict:
@@ -73,115 +131,409 @@ def parse_biblio(record: dict, source_file: str) -> dict:
     meta = record.get("applicationMetaData") or {}
     entity_data = meta.get("entityStatusData") or {}
 
-    application_number = (record.get("applicationNumberText") or "").strip() or None
-    patent_number = normalize_patent_number(
-        (meta.get("patentNumber") or "").strip()
-    )
-    invention_title = (meta.get("inventionTitle") or "").strip() or None
-    filing_date = parse_date(meta.get("filingDate"))
-    effective_filing_date = parse_date(meta.get("effectiveFilingDate"))
-    grant_date = parse_date(meta.get("grantDate"))
-    entity_status = map_entity_status(
-        entity_data.get("businessEntityStatusCategory", "")
-    )
-    small_entity_indicator = entity_data.get("smallEntityStatusIndicator")
-
-    application_type = (meta.get("applicationTypeCode") or "").strip() or None
-    application_type_category = (meta.get("applicationTypeCategory") or "").strip() or None
-    application_status_code = meta.get("applicationStatusCode")
-    application_status = (meta.get("applicationStatusDescriptionText") or "").strip() or None
-    first_inventor_name = (meta.get("firstInventorName") or "").strip() or None
-    first_applicant_name = (meta.get("firstApplicantName") or "").strip() or None
-    examiner_name = (meta.get("examinerNameText") or "").strip() or None
-    group_art_unit = str(meta.get("groupArtUnitNumber", "")).strip() or None
-    cpc_codes = meta.get("cpcClassificationBag") or []
-    uspc_class = (meta.get("class") or "").strip() or None
-    uspc_subclass = (meta.get("subclass") or "").strip() or None
-    customer_number = meta.get("customerNumber")
-    earliest_pub_number = (meta.get("earliestPublicationNumber") or "").strip() or None
-    earliest_pub_date = parse_date(meta.get("earliestPublicationDate"))
-    national_stage = meta.get("nationalStageIndicator")
     fitf_raw = meta.get("firstInventorToFileIndicator")
     first_inventor_to_file = fitf_raw == "Y" if fitf_raw else None
 
     return {
-        "application_number": application_number,
-        "patent_number": patent_number,
-        "invention_title": invention_title,
-        "filing_date": filing_date,
-        "effective_filing_date": effective_filing_date,
-        "grant_date": grant_date,
-        "entity_status": entity_status,
-        "small_entity_indicator": small_entity_indicator,
-        "application_type": application_type,
-        "application_type_category": application_type_category,
-        "application_status_code": application_status_code,
-        "application_status": application_status,
-        "first_inventor_name": first_inventor_name,
-        "first_applicant_name": first_applicant_name,
-        "examiner_name": examiner_name,
-        "group_art_unit": group_art_unit,
-        "cpc_codes": cpc_codes if cpc_codes else [],
-        "uspc_class": uspc_class,
-        "uspc_subclass": uspc_subclass,
-        "customer_number": customer_number,
-        "earliest_publication_number": earliest_pub_number,
-        "earliest_publication_date": earliest_pub_date,
-        "national_stage_indicator": national_stage,
+        "application_number": _str(record.get("applicationNumberText")),
+        "patent_number": normalize_patent_number((meta.get("patentNumber") or "").strip()),
+        "invention_title": _str(meta.get("inventionTitle")),
+        "filing_date": parse_date(meta.get("filingDate")),
+        "effective_filing_date": parse_date(meta.get("effectiveFilingDate")),
+        "grant_date": parse_date(meta.get("grantDate")),
+        "entity_status": map_entity_status(entity_data.get("businessEntityStatusCategory", "")),
+        "small_entity_indicator": entity_data.get("smallEntityStatusIndicator"),
+        "application_type": _str(meta.get("applicationTypeCode")),
+        "application_type_category": _str(meta.get("applicationTypeCategory")),
+        "application_status_code": meta.get("applicationStatusCode"),
+        "application_status": _str(meta.get("applicationStatusDescriptionText")),
+        "first_inventor_name": _str(meta.get("firstInventorName")),
+        "first_applicant_name": _str(meta.get("firstApplicantName")),
+        "examiner_name": _str(meta.get("examinerNameText")),
+        "group_art_unit": str(meta.get("groupArtUnitNumber", "")).strip() or None,
+        "cpc_codes": meta.get("cpcClassificationBag") or [],
+        "uspc_class": _str(meta.get("class")),
+        "uspc_subclass": _str(meta.get("subclass")),
+        "customer_number": meta.get("customerNumber"),
+        "earliest_publication_number": _str(meta.get("earliestPublicationNumber")),
+        "earliest_publication_date": parse_date(meta.get("earliestPublicationDate")),
+        "national_stage_indicator": meta.get("nationalStageIndicator"),
         "first_inventor_to_file": first_inventor_to_file,
+        # NEW fields
+        "docket_number": _str(meta.get("docketNumber")),
+        "application_confirmation_number": _int(meta.get("applicationConfirmationNumber")),
+        "application_status_date": parse_date(meta.get("applicationStatusDate")),
+        "application_type_label": _str(meta.get("applicationTypeLabelName")),
+        "pct_publication_number": _str(meta.get("pctPublicationNumber")),
+        "pct_publication_date": parse_date(meta.get("pctPublicationDate")),
+        "intl_registration_number": _str(meta.get("internationalRegistrationNumber")),
+        "intl_registration_pub_date": parse_date(meta.get("internationalRegistrationPublicationDate")),
+        "uspc_symbol": _str(meta.get("uspcSymbolText")),
+        "last_ingestion_datetime": _str(record.get("lastIngestionDateTime")),
         "source_file": source_file,
     }
 
 
 def parse_transactions(record: dict, source_file: str) -> list[dict]:
-    """Extract transaction events from a PFW record for pfw_transactions."""
-    application_number = (record.get("applicationNumberText") or "").strip()
-    if not application_number:
+    """Extract transaction events from eventDataBag for pfw_transactions."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
         return []
-
     rows = []
     for event in record.get("eventDataBag") or []:
-        event_date = parse_date(event.get("eventDate"))
-        event_code = (event.get("eventCode") or "").strip() or None
-        event_description = (event.get("eventDescriptionText") or "").strip() or None
         rows.append({
-            "application_number": application_number,
-            "event_date": event_date,
-            "event_code": event_code,
-            "event_description": event_description,
+            "application_number": app_num,
+            "event_date": parse_date(event.get("eventDate")),
+            "event_code": _str(event.get("eventCode")),
+            "event_description": _str(event.get("eventDescriptionText")),
             "source_file": source_file,
         })
     return rows
 
 
 def parse_continuity(record: dict, source_file: str) -> list[dict]:
-    """Extract continuity data from a PFW record for pfw_continuity."""
-    application_number = (record.get("applicationNumberText") or "").strip()
-    if not application_number:
+    """Extract parent continuity from parentContinuityBag for pfw_continuity."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
         return []
-
     rows = []
     for cont in record.get("parentContinuityBag") or []:
         rows.append({
-            "application_number": application_number,
-            "claim_parentage_type_code": (cont.get("claimParentageTypeCode") or "").strip() or None,
-            "claim_parentage_description": (cont.get("claimParentageTypeCodeDescriptionText") or "").strip() or None,
-            "parent_application_number": (cont.get("parentApplicationNumberText") or "").strip() or None,
+            "application_number": app_num,
+            "claim_parentage_type_code": _str(cont.get("claimParentageTypeCode")),
+            "claim_parentage_description": _str(cont.get("claimParentageTypeCodeDescriptionText")),
+            "parent_application_number": _str(cont.get("parentApplicationNumberText")),
             "parent_filing_date": parse_date(cont.get("parentApplicationFilingDate")),
-            "child_application_number": (cont.get("childApplicationNumberText") or "").strip() or None,
+            "child_application_number": _str(cont.get("childApplicationNumberText")),
             "parent_patent_number": normalize_patent_number(
                 (cont.get("parentPatentNumber") or "").strip()
             ),
             "parent_status_code": cont.get("parentApplicationStatusCode"),
-            "parent_status_description": (cont.get("parentApplicationStatusDescriptionText") or "").strip() or None,
+            "parent_status_description": _str(cont.get("parentApplicationStatusDescriptionText")),
             "source_file": source_file,
         })
     return rows
 
 
+def parse_applicants(record: dict, source_file: str) -> list[dict]:
+    """Extract all applicants from applicationMetaData.applicantBag for pfw_applicants."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    meta = record.get("applicationMetaData") or {}
+    rows = []
+    for person in meta.get("applicantBag") or []:
+        row = {"application_number": app_num, "source_file": source_file}
+        extracted = _extract_person_address(person, "applicantNameText")
+        row.update(extracted)
+        rows.append(row)
+    return rows
+
+
+def parse_inventors(record: dict, source_file: str) -> list[dict]:
+    """Extract all inventors from applicationMetaData.inventorBag for pfw_inventors."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    meta = record.get("applicationMetaData") or {}
+    rows = []
+    for person in meta.get("inventorBag") or []:
+        row = {"application_number": app_num, "source_file": source_file}
+        extracted = _extract_person_address(person, "inventorNameText")
+        row.update(extracted)
+        rows.append(row)
+    return rows
+
+
+def parse_child_continuity(record: dict, source_file: str) -> list[dict]:
+    """Extract child continuity from childContinuityBag for pfw_child_continuity."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    rows = []
+    for child in record.get("childContinuityBag") or []:
+        fitf = child.get("firstInventorToFileIndicator")
+        rows.append({
+            "application_number": app_num,
+            "child_application_number": _str(child.get("childApplicationNumberText")),
+            "parent_application_number": _str(child.get("parentApplicationNumberText")),
+            "child_filing_date": parse_date(child.get("childApplicationFilingDate")),
+            "child_patent_number": normalize_patent_number(
+                (child.get("childPatentNumber") or "").strip()
+            ),
+            "child_status_code": _int(child.get("childApplicationStatusCode")),
+            "child_status_description": _str(child.get("childApplicationStatusDescriptionText")),
+            "claim_parentage_type_code": _str(child.get("claimParentageTypeCode")),
+            "claim_parentage_description": _str(child.get("claimParentageTypeCodeDescriptionText")),
+            "first_inventor_to_file": fitf if isinstance(fitf, bool) else None,
+            "source_file": source_file,
+        })
+    return rows
+
+
+def parse_foreign_priority(record: dict, source_file: str) -> list[dict]:
+    """Extract foreign priority claims from foreignPriorityBag for pfw_foreign_priority."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    rows = []
+    for fp in record.get("foreignPriorityBag") or []:
+        rows.append({
+            "application_number": app_num,
+            "priority_country": _str(fp.get("ipOfficeName")),
+            "priority_filing_date": parse_date(fp.get("filingDate")),
+            "priority_application_number": _str(fp.get("applicationNumberText")),
+            "source_file": source_file,
+        })
+    return rows
+
+
+def parse_publications(record: dict, source_file: str) -> list[dict]:
+    """Extract publications from parallel arrays in applicationMetaData for pfw_publications."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    meta = record.get("applicationMetaData") or {}
+    dates = meta.get("publicationDateBag") or []
+    seq_nums = meta.get("publicationSequenceNumberBag") or []
+    categories = meta.get("publicationCategoryBag") or []
+    max_len = max(len(dates), len(seq_nums), len(categories))
+    if max_len == 0:
+        return []
+    rows = []
+    for i in range(max_len):
+        rows.append({
+            "application_number": app_num,
+            "publication_date": _str(dates[i]) if i < len(dates) else None,
+            "publication_sequence_number": _str(seq_nums[i]) if i < len(seq_nums) else None,
+            "publication_category": _str(categories[i]) if i < len(categories) else None,
+            "source_file": source_file,
+        })
+    return rows
+
+
+def parse_pta(record: dict, source_file: str) -> dict | None:
+    """Extract PTA summary from patentTermAdjustmentData for pfw_patent_term_adjustment."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return None
+    pta = record.get("patentTermAdjustmentData")
+    if not pta:
+        return None
+    return {
+        "application_number": app_num,
+        "a_delay_days": _int(pta.get("aDelayQuantity")),
+        "b_delay_days": _int(pta.get("bDelayQuantity")),
+        "c_delay_days": _int(pta.get("cDelayQuantity")),
+        "overlap_days": _int(pta.get("overlappingDayQuantity")),
+        "non_overlap_days": _int(pta.get("nonOverlappingDayQuantity")),
+        "applicant_delay_days": _int(pta.get("applicantDayDelayQuantity")),
+        "adjustment_total_days": _int(pta.get("adjustmentTotalQuantity")),
+        "source_file": source_file,
+    }
+
+
+def parse_pta_history(record: dict, source_file: str) -> list[dict]:
+    """Extract PTA history events from patentTermAdjustmentData.patentTermAdjustmentHistoryDataBag."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    pta = record.get("patentTermAdjustmentData")
+    if not pta:
+        return []
+    rows = []
+    for evt in pta.get("patentTermAdjustmentHistoryDataBag") or []:
+        rows.append({
+            "application_number": app_num,
+            "event_sequence_number": _int(evt.get("eventSequenceNumber")),
+            "event_date": parse_date(evt.get("eventDate")),
+            "event_description": _str(evt.get("eventDescriptionText")),
+            "pta_pte_code": _str(evt.get("ptaPTECode")),
+            "ip_office_delay_days": _int(evt.get("ipOfficeDayDelayQuantity")),
+            "applicant_delay_days": _int(evt.get("applicantDayDelayQuantity")),
+            "originating_event_sequence": _int(evt.get("originatingEventSequenceNumber")),
+            "source_file": source_file,
+        })
+    return rows
+
+
+def parse_correspondence_address(record: dict, source_file: str) -> list[dict]:
+    """Extract top-level correspondence address from correspondenceAddressBag."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    rows = []
+    for addr in record.get("correspondenceAddressBag") or []:
+        rows.append({
+            "application_number": app_num,
+            "name_line_1": _str(addr.get("nameLineOneText")),
+            "name_line_2": _str(addr.get("nameLineTwoText")),
+            "address_line_1": _str(addr.get("addressLineOneText")),
+            "address_line_2": _str(addr.get("addressLineTwoText")),
+            "city": _str(addr.get("cityName")),
+            "region": _str(addr.get("geographicRegionName")),
+            "region_code": _str(addr.get("geographicRegionCode")),
+            "postal_code": _str(addr.get("postalCode")),
+            "country_code": _str(addr.get("countryCode")),
+            "country_name": _str(addr.get("countryName")),
+            "source_file": source_file,
+        })
+    return rows
+
+
+def parse_attorneys(record: dict, source_file: str) -> list[dict]:
+    """Extract attorneys from recordAttorney (POA, attorney, and customer correspondence)."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    attorney_data = record.get("recordAttorney")
+    if not attorney_data:
+        return []
+    rows = []
+
+    # Power of Attorney
+    for poa in attorney_data.get("powerOfAttorneyBag") or []:
+        rows.append({
+            "application_number": app_num,
+            "role": "power_of_attorney",
+            "first_name": _str(poa.get("firstName")),
+            "middle_name": _str(poa.get("middleName")),
+            "last_name": _str(poa.get("lastName")),
+            "name_prefix": _str(poa.get("namePrefix")),
+            "name_suffix": _str(poa.get("nameSuffix")),
+            "preferred_name": _str(poa.get("preferredName")),
+            "registration_number": _str(poa.get("registrationNumber")),
+            "active_indicator": _str(poa.get("activeIndicator")),
+            "practitioner_category": _str(poa.get("registeredPractitionerCategory")),
+            "country_code": _str(poa.get("countryCode")),
+            "patron_identifier": None,
+            "organization_name": None,
+            "source_file": source_file,
+        })
+
+    # Attorney of record
+    for att in attorney_data.get("attorneyBag") or []:
+        rows.append({
+            "application_number": app_num,
+            "role": "attorney",
+            "first_name": _str(att.get("firstName")),
+            "middle_name": _str(att.get("middleName")),
+            "last_name": _str(att.get("lastName")),
+            "name_prefix": _str(att.get("namePrefix")),
+            "name_suffix": _str(att.get("nameSuffix")),
+            "preferred_name": None,
+            "registration_number": _str(att.get("registrationNumber")),
+            "active_indicator": _str(att.get("activeIndicator")),
+            "practitioner_category": _str(att.get("registeredPractitionerCategory")),
+            "country_code": None,
+            "patron_identifier": None,
+            "organization_name": None,
+            "source_file": source_file,
+        })
+
+    # Customer number correspondence data
+    for cust in attorney_data.get("customerNumberCorrespondenceData") or []:
+        rows.append({
+            "application_number": app_num,
+            "role": "customer_correspondence",
+            "first_name": None,
+            "middle_name": None,
+            "last_name": None,
+            "name_prefix": None,
+            "name_suffix": None,
+            "preferred_name": None,
+            "registration_number": None,
+            "active_indicator": None,
+            "practitioner_category": None,
+            "country_code": None,
+            "patron_identifier": _int(cust.get("patronIdentifier")),
+            "organization_name": _str(cust.get("organizationStandardName")),
+            "source_file": source_file,
+        })
+
+    return rows
+
+
+def parse_document_metadata(record: dict, source_file: str) -> list[dict]:
+    """Extract document metadata from pgpubDocumentMetaData and grantDocumentMetaData."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    rows = []
+    for doc_type, key in [("pgpub", "pgpubDocumentMetaData"), ("grant", "grantDocumentMetaData")]:
+        doc = record.get(key)
+        if doc:
+            rows.append({
+                "application_number": app_num,
+                "document_type": doc_type,
+                "zip_file_name": _str(doc.get("zipFileName")),
+                "product_identifier": _str(doc.get("productIdentifier")),
+                "file_location_uri": _str(doc.get("fileLocationURI")),
+                "file_create_datetime": _str(doc.get("fileCreateDateTime")),
+                "xml_file_name": _str(doc.get("xmlFileName")),
+                "source_file": source_file,
+            })
+    return rows
+
+
+def parse_embedded_assignments(record: dict, source_file: str) -> list[dict]:
+    """Extract embedded assignment chain from assignmentBag for pfw_embedded_assignments."""
+    app_num = _str(record.get("applicationNumberText"))
+    if not app_num:
+        return []
+    rows = []
+    for asn in record.get("assignmentBag") or []:
+        # Flatten assignor names
+        assignor_names = ", ".join(
+            n for a in (asn.get("assignorBag") or [])
+            if (n := _str(a.get("assignorName")))
+        ) or None
+        # Flatten assignee names
+        assignee_names = ", ".join(
+            n for a in (asn.get("assigneeBag") or [])
+            if (n := _str(a.get("assigneeNameText")))
+        ) or None
+        # First correspondent name
+        corr_list = asn.get("correspondenceAddress") or []
+        corr_name = _str(corr_list[0].get("correspondentNameText")) if corr_list else None
+
+        rows.append({
+            "application_number": app_num,
+            "reel_frame": _str(asn.get("reelAndFrameNumber")),
+            "reel_number": _int(asn.get("reelNumber")),
+            "frame_number": _int(asn.get("frameNumber")),
+            "page_count": _int(asn.get("pageTotalQuantity")),
+            "document_uri": _str(asn.get("assignmentDocumentLocationURI")),
+            "received_date": parse_date(asn.get("assignmentReceivedDate")),
+            "recorded_date": parse_date(asn.get("assignmentRecordedDate")),
+            "mailed_date": parse_date(asn.get("assignmentMailedDate")),
+            "conveyance_text": _str(asn.get("conveyanceText")),
+            "assignor_names": assignor_names,
+            "assignee_names": assignee_names,
+            "correspondent_name": corr_name,
+            "source_file": source_file,
+        })
+    return rows
+
+
+# ─── Processing ─────────────────────────────────────────────────────
+
+# Output file keys (order matters for tuple unpacking)
+OUTPUT_KEYS = [
+    "biblio", "transactions", "continuity",
+    "applicants", "inventors", "child_continuity", "foreign_priority",
+    "publications", "pta_summary", "pta_history",
+    "correspondence", "attorneys", "doc_metadata", "embedded_assignments",
+]
+
+
 def process_year_file(zf: zipfile.ZipFile, filename: str,
-                      biblio_out, txn_out, cont_out, min_year: int):
-    """Process a single year JSON file from the ZIP, streaming with ijson."""
+                      writers: dict, min_year: int) -> dict:
+    """Process a single year JSON file from the ZIP, streaming with ijson.
+
+    writers: dict mapping OUTPUT_KEYS to open gzip file handles.
+    Returns: dict mapping OUTPUT_KEYS to row counts.
+    """
     stem = Path(filename).stem
     try:
         year = int(stem)
@@ -191,14 +543,24 @@ def process_year_file(zf: zipfile.ZipFile, filename: str,
     if year is not None and year < min_year:
         print(f"  Skipping {filename}: year {year} < min_year {min_year}",
               file=sys.stderr)
-        return 0, 0, 0
+        return {k: 0 for k in OUTPUT_KEYS}
 
     label = f"year {year}" if year else stem
     print(f"  Processing {filename} ({label})...", file=sys.stderr)
 
-    biblio_count = 0
-    txn_count = 0
-    cont_count = 0
+    counts = {k: 0 for k in OUTPUT_KEYS}
+
+    def _write(key: str, rows):
+        """Write rows to the appropriate output file."""
+        out = writers[key]
+        if isinstance(rows, dict):
+            # Single row (e.g., PTA summary)
+            out.write(json.dumps(rows, ensure_ascii=False) + "\n")
+            counts[key] += 1
+        elif isinstance(rows, list):
+            for row in rows:
+                out.write(json.dumps(row, ensure_ascii=False) + "\n")
+                counts[key] += 1
 
     with zf.open(filename) as f:
         records = ijson.items(f, "patentFileWrapperDataBag.item")
@@ -207,39 +569,94 @@ def process_year_file(zf: zipfile.ZipFile, filename: str,
             if not app_num:
                 continue
 
-            # Biblio
+            # 1. Biblio
             biblio = parse_biblio(record, filename)
             if biblio["application_number"]:
-                biblio_out.write(json.dumps(biblio, ensure_ascii=False) + "\n")
-                biblio_count += 1
+                _write("biblio", biblio)
 
-            # Transactions
-            txns = parse_transactions(record, filename)
-            for txn in txns:
-                txn_out.write(json.dumps(txn, ensure_ascii=False) + "\n")
-                txn_count += 1
+            # 2. Transactions
+            _write("transactions", parse_transactions(record, filename))
 
-            # Continuity (not typically in bulk PTFWPRE, but handle if present)
-            conts = parse_continuity(record, filename)
-            for cont in conts:
-                cont_out.write(json.dumps(cont, ensure_ascii=False) + "\n")
-                cont_count += 1
+            # 3. Parent continuity
+            _write("continuity", parse_continuity(record, filename))
 
-            if biblio_count % 100000 == 0 and biblio_count > 0:
-                print(f"    {biblio_count:,} apps, {txn_count:,} events...",
+            # 4. Applicants
+            _write("applicants", parse_applicants(record, filename))
+
+            # 5. Inventors
+            _write("inventors", parse_inventors(record, filename))
+
+            # 6. Child continuity
+            _write("child_continuity", parse_child_continuity(record, filename))
+
+            # 7. Foreign priority
+            _write("foreign_priority", parse_foreign_priority(record, filename))
+
+            # 8. Publications
+            _write("publications", parse_publications(record, filename))
+
+            # 9. PTA summary (single row or None)
+            pta = parse_pta(record, filename)
+            if pta:
+                _write("pta_summary", pta)
+
+            # 10. PTA history
+            _write("pta_history", parse_pta_history(record, filename))
+
+            # 11. Correspondence address
+            _write("correspondence", parse_correspondence_address(record, filename))
+
+            # 12. Attorneys
+            _write("attorneys", parse_attorneys(record, filename))
+
+            # 13. Document metadata
+            _write("doc_metadata", parse_document_metadata(record, filename))
+
+            # 14. Embedded assignments
+            _write("embedded_assignments", parse_embedded_assignments(record, filename))
+
+            if counts["biblio"] % 100000 == 0 and counts["biblio"] > 0:
+                print(f"    {counts['biblio']:,} apps, "
+                      f"{counts['transactions']:,} events, "
+                      f"{counts['applicants']:,} applicants, "
+                      f"{counts['inventors']:,} inventors...",
                       file=sys.stderr)
 
-    print(f"  {filename}: {biblio_count:,} apps, {txn_count:,} events, "
-          f"{cont_count:,} continuity records", file=sys.stderr)
-    return biblio_count, txn_count, cont_count
+    print(f"  {filename}: {counts['biblio']:,} apps, "
+          f"{counts['transactions']:,} events, "
+          f"{counts['applicants']:,} applicants, "
+          f"{counts['inventors']:,} inventors",
+          file=sys.stderr)
+    return counts
 
 
-def parse_zip(zip_path: str, output_dir: str, min_year: int = 2001):
-    """Parse a PTFWPRE/PFW ZIP file into 3 JSONL output files."""
+# File prefix for each output key
+FILE_PREFIXES = {
+    "biblio": "pfw_biblio",
+    "transactions": "pfw_transactions",
+    "continuity": "pfw_continuity",
+    "applicants": "pfw_applicants",
+    "inventors": "pfw_inventors",
+    "child_continuity": "pfw_child_cont",
+    "foreign_priority": "pfw_foreign_priority",
+    "publications": "pfw_publications",
+    "pta_summary": "pfw_pta_summary",
+    "pta_history": "pfw_pta_history",
+    "correspondence": "pfw_correspondence",
+    "attorneys": "pfw_attorneys",
+    "doc_metadata": "pfw_doc_metadata",
+    "embedded_assignments": "pfw_embedded_assign",
+}
+
+
+def parse_zip(zip_path: str, output_dir: str, min_year: int = 2001) -> dict:
+    """Parse a PTFWPRE/PFW ZIP file into 14 JSONL output files.
+
+    Returns a dict mapping output keys to row counts.
+    """
     zf = zipfile.ZipFile(zip_path)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Get year files sorted (newest first for progress visibility)
     year_files = sorted(
         [n for n in zf.namelist() if n.endswith(".json")],
         reverse=True,
@@ -247,31 +664,37 @@ def parse_zip(zip_path: str, output_dir: str, min_year: int = 2001):
     print(f"ZIP contains {len(year_files)} files: {year_files}", file=sys.stderr)
 
     zip_stem = Path(zip_path).stem
-    biblio_path = os.path.join(output_dir, f"pfw_biblio_{zip_stem}.jsonl.gz")
-    txn_path = os.path.join(output_dir, f"pfw_transactions_{zip_stem}.jsonl.gz")
-    cont_path = os.path.join(output_dir, f"pfw_continuity_{zip_stem}.jsonl.gz")
 
-    total_biblio = 0
-    total_txn = 0
-    total_cont = 0
+    # Build output file paths
+    output_paths = {}
+    for key, prefix in FILE_PREFIXES.items():
+        output_paths[key] = os.path.join(output_dir, f"{prefix}_{zip_stem}.jsonl.gz")
 
-    with gzip.open(biblio_path, "wt", encoding="utf-8") as biblio_out, \
-         gzip.open(txn_path, "wt", encoding="utf-8") as txn_out, \
-         gzip.open(cont_path, "wt", encoding="utf-8") as cont_out:
+    totals = {k: 0 for k in OUTPUT_KEYS}
+
+    # Open all 14 gzip writers
+    open_files = {}
+    try:
+        for key in OUTPUT_KEYS:
+            open_files[key] = gzip.open(output_paths[key], "wt", encoding="utf-8")
 
         for filename in year_files:
-            b, t, c = process_year_file(zf, filename, biblio_out, txn_out, cont_out, min_year)
-            total_biblio += b
-            total_txn += t
-            total_cont += c
+            file_counts = process_year_file(zf, filename, open_files, min_year)
+            for k in OUTPUT_KEYS:
+                totals[k] += file_counts[k]
+    finally:
+        for fh in open_files.values():
+            fh.close()
 
-    print(f"\nTotal: {total_biblio:,} biblio, {total_txn:,} transactions, "
-          f"{total_cont:,} continuity records", file=sys.stderr)
-    print(f"Output files:", file=sys.stderr)
-    print(f"  {biblio_path}", file=sys.stderr)
-    print(f"  {txn_path}", file=sys.stderr)
-    print(f"  {cont_path}", file=sys.stderr)
-    return total_biblio, total_txn, total_cont
+    print(f"\nTotal rows extracted:", file=sys.stderr)
+    for key in OUTPUT_KEYS:
+        if totals[key] > 0:
+            print(f"  {key}: {totals[key]:,}", file=sys.stderr)
+    print(f"\nOutput files ({len(output_paths)}):", file=sys.stderr)
+    for key in OUTPUT_KEYS:
+        print(f"  {output_paths[key]}", file=sys.stderr)
+
+    return totals
 
 
 if __name__ == "__main__":
