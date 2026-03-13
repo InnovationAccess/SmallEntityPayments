@@ -927,3 +927,49 @@ textarea { resize: vertical; }
   font-weight: 600;
   margin-bottom: .5rem;
 }
+
+/* =====================================================================
+   Prosecution Fee Investigation
+   ===================================================================== */
+
+/* Hint text below headers */
+.px-hint {
+  font-size: .82rem;
+  color: #666;
+  margin: .25rem 0 .75rem;
+}
+
+/* Entity row clickable highlight */
+.px-entity-row {
+  cursor: pointer;
+  transition: background .15s;
+}
+.px-entity-row:hover {
+  background: #eef3ff;
+}
+.px-entity-row.px-selected {
+  background: #d0e0ff;
+  font-weight: 600;
+}
+
+/* Application row multi-select */
+.px-app-row {
+  cursor: pointer;
+  transition: background .15s;
+}
+.px-app-row:hover {
+  background: #f0f6ff;
+}
+.px-app-row.px-selected {
+  background: #cfe2ff;
+}
+
+/* Selected count badge */
+.px-sel-count {
+  background: #1a73e8;
+  color: #fff;
+  padding: .15rem .5rem;
+  border-radius: 10px;
+  font-size: .78rem;
+  margin-left: .5rem;
+}

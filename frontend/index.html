@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=5" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=6" />
 </head>
 <body>
 
@@ -21,6 +21,7 @@
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
         <button class="tab-btn"        data-tab="citations"     role="tab" aria-selected="false">Forward&nbsp;Citations</button>
         <button class="tab-btn"        data-tab="entity-status"  role="tab" aria-selected="false">Entity&nbsp;Status</button>
+        <button class="tab-btn"        data-tab="prosecution"   role="tab" aria-selected="false">Prosecution&nbsp;Fees</button>
         <button class="tab-btn"        data-tab="etl-log"       role="tab" aria-selected="false">Update&nbsp;Log</button>
       </nav>
     </div>
@@ -309,7 +310,69 @@
       <div id="es-status" class="status-msg hidden"></div>
     </section>
 
-    <!-- ===== Tab 6: Data Update Log ===== -->
+    <!-- ===== Tab 6: Prosecution Fee Investigation ===== -->
+    <section id="tab-prosecution" class="tab-panel" role="tabpanel">
+      <h2 class="panel-title">Prosecution Fee Investigation</h2>
+      <p class="panel-desc">
+        Investigate prosecution payment patterns for entities that declared small
+        entity status. Identify entities, drill into their applications, retrieve
+        payment invoices, and extract fee codes.
+      </p>
+
+      <!-- Phase 1: Entity Discovery -->
+      <div class="card">
+        <h3 class="card-title">Phase 1 — Entity Discovery</h3>
+        <p class="card-desc">
+          Find entities with a minimum number of small entity (SMAL) declarations
+          in prosecution events from 2016 onwards.
+        </p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="px-min-decl">Min SMAL Declarations</label>
+            <input id="px-min-decl" type="number" value="1000" min="1" max="100000" />
+          </div>
+          <div class="form-group">
+            <label for="px-entity-limit">Max Entities</label>
+            <input id="px-entity-limit" type="number" value="200" min="1" max="1000" />
+          </div>
+        </div>
+        <button id="px-discover-btn" class="btn btn-primary">Discover Entities</button>
+      </div>
+
+      <!-- Phase 1 results: entity list -->
+      <div id="px-entity-results" class="results-area hidden"></div>
+
+      <!-- Phase 2: Application drill-down (shown after entity selection) -->
+      <div id="px-phase2" class="card hidden">
+        <h3 class="card-title">Phase 2 — Applications for <span id="px-selected-entity"></span></h3>
+        <p class="card-desc">
+          Showing applications with SMAL declarations for the selected entity.
+          Use Ctrl+Click to select multiple rows, then retrieve payment invoices.
+        </p>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="px-date-from">Date From</label>
+            <input id="px-date-from" type="date" value="2016-01-01" />
+          </div>
+          <div class="form-group">
+            <label for="px-date-to">Date To</label>
+            <input id="px-date-to" type="date" value="2026-12-31" />
+          </div>
+          <div class="form-group">
+            <label for="px-app-limit">Max Applications</label>
+            <input id="px-app-limit" type="number" value="5000" min="1" max="10000" />
+          </div>
+        </div>
+        <button id="px-drilldown-btn" class="btn btn-primary">Load Applications</button>
+      </div>
+
+      <!-- Phase 2 results: application list -->
+      <div id="px-app-results" class="results-area hidden"></div>
+
+      <div id="px-status" class="status-msg hidden"></div>
+    </section>
+
+    <!-- ===== Tab 7: Data Update Log ===== -->
     <section id="tab-etl-log" class="tab-panel" role="tabpanel">
       <h2 class="panel-title">Data Update Log</h2>
       <p class="panel-desc">
@@ -426,6 +489,7 @@
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
   <script src="/static/js/citations.js?v=4"    type="module"></script>
   <script src="/static/js/entity_status.js?v=1" type="module"></script>
+  <script src="/static/js/prosecution.js?v=1" type="module"></script>
   <script src="/static/js/etl_log.js?v=2"    type="module"></script>
 </body>
 </html>
