@@ -69,6 +69,17 @@ def _str(val) -> str | None:
     return (val or "").strip() or None if isinstance(val, str) else (str(val).strip() or None if val is not None else None)
 
 
+def _as_list(val) -> list:
+    """Ensure a value is a list. Wraps dicts/scalars in a list, returns [] for None."""
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return val
+    if isinstance(val, dict):
+        return [val]
+    return []
+
+
 def _int(val) -> int | None:
     """Safely extract an integer or None."""
     if val is None:
@@ -86,7 +97,7 @@ def _extract_person_address(person: dict, name_key: str) -> dict:
     name_key is 'applicantNameText' for applicants, 'inventorNameText' for inventors.
     """
     addr = {}
-    addr_bag = person.get("correspondenceAddressBag") or []
+    addr_bag = _as_list(person.get("correspondenceAddressBag"))
     if addr_bag and isinstance(addr_bag[0], dict):
         a = addr_bag[0]
         addr = {
@@ -180,7 +191,7 @@ def parse_transactions(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for event in record.get("eventDataBag") or []:
+    for event in _as_list(record.get("eventDataBag")):
         if not isinstance(event, dict):
             continue
         rows.append({
@@ -199,7 +210,7 @@ def parse_continuity(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for cont in record.get("parentContinuityBag") or []:
+    for cont in _as_list(record.get("parentContinuityBag")):
         if not isinstance(cont, dict):
             continue
         rows.append({
@@ -226,7 +237,7 @@ def parse_applicants(record: dict, source_file: str) -> list[dict]:
         return []
     meta = record.get("applicationMetaData") or {}
     rows = []
-    for person in meta.get("applicantBag") or []:
+    for person in _as_list(meta.get("applicantBag")):
         if not isinstance(person, dict):
             continue
         row = {"application_number": app_num, "source_file": source_file}
@@ -243,7 +254,7 @@ def parse_inventors(record: dict, source_file: str) -> list[dict]:
         return []
     meta = record.get("applicationMetaData") or {}
     rows = []
-    for person in meta.get("inventorBag") or []:
+    for person in _as_list(meta.get("inventorBag")):
         if not isinstance(person, dict):
             continue
         row = {"application_number": app_num, "source_file": source_file}
@@ -259,7 +270,7 @@ def parse_child_continuity(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for child in record.get("childContinuityBag") or []:
+    for child in _as_list(record.get("childContinuityBag")):
         if not isinstance(child, dict):
             continue
         fitf = child.get("firstInventorToFileIndicator")
@@ -287,7 +298,7 @@ def parse_foreign_priority(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for fp in record.get("foreignPriorityBag") or []:
+    for fp in _as_list(record.get("foreignPriorityBag")):
         if not isinstance(fp, dict):
             continue
         rows.append({
@@ -306,9 +317,9 @@ def parse_publications(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     meta = record.get("applicationMetaData") or {}
-    dates = meta.get("publicationDateBag") or []
-    seq_nums = meta.get("publicationSequenceNumberBag") or []
-    categories = meta.get("publicationCategoryBag") or []
+    dates = _as_list(meta.get("publicationDateBag"))
+    seq_nums = _as_list(meta.get("publicationSequenceNumberBag"))
+    categories = _as_list(meta.get("publicationCategoryBag"))
     max_len = max(len(dates), len(seq_nums), len(categories))
     if max_len == 0:
         return []
@@ -354,7 +365,7 @@ def parse_pta_history(record: dict, source_file: str) -> list[dict]:
     if not pta:
         return []
     rows = []
-    for evt in pta.get("patentTermAdjustmentHistoryDataBag") or []:
+    for evt in _as_list(pta.get("patentTermAdjustmentHistoryDataBag")):
         if not isinstance(evt, dict):
             continue
         rows.append({
@@ -377,7 +388,7 @@ def parse_correspondence_address(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for addr in record.get("correspondenceAddressBag") or []:
+    for addr in _as_list(record.get("correspondenceAddressBag")):
         if not isinstance(addr, dict):
             continue
         rows.append({
@@ -408,7 +419,7 @@ def parse_attorneys(record: dict, source_file: str) -> list[dict]:
     rows = []
 
     # Power of Attorney
-    for poa in attorney_data.get("powerOfAttorneyBag") or []:
+    for poa in _as_list(attorney_data.get("powerOfAttorneyBag")):
         if not isinstance(poa, dict):
             continue
         rows.append({
@@ -430,7 +441,7 @@ def parse_attorneys(record: dict, source_file: str) -> list[dict]:
         })
 
     # Attorney of record
-    for att in attorney_data.get("attorneyBag") or []:
+    for att in _as_list(attorney_data.get("attorneyBag")):
         if not isinstance(att, dict):
             continue
         rows.append({
@@ -452,7 +463,7 @@ def parse_attorneys(record: dict, source_file: str) -> list[dict]:
         })
 
     # Customer number correspondence data
-    for cust in attorney_data.get("customerNumberCorrespondenceData") or []:
+    for cust in _as_list(attorney_data.get("customerNumberCorrespondenceData")):
         if not isinstance(cust, dict):
             continue
         rows.append({
@@ -504,7 +515,7 @@ def parse_embedded_assignments(record: dict, source_file: str) -> list[dict]:
     if not app_num:
         return []
     rows = []
-    for asn in record.get("assignmentBag") or []:
+    for asn in _as_list(record.get("assignmentBag")):
         if not isinstance(asn, dict):
             continue
         # Flatten assignor names
@@ -518,7 +529,7 @@ def parse_embedded_assignments(record: dict, source_file: str) -> list[dict]:
             if isinstance(a, dict) and (n := _str(a.get("assigneeNameText")))
         ) or None
         # First correspondent name
-        corr_list = asn.get("correspondenceAddress") or []
+        corr_list = _as_list(asn.get("correspondenceAddress"))
         corr_name = _str(corr_list[0].get("correspondentNameText")) if corr_list and isinstance(corr_list[0], dict) else None
 
         rows.append({
@@ -587,69 +598,58 @@ def process_year_file(zf: zipfile.ZipFile, filename: str,
                 counts[key] += 1
 
     errors = 0
+
+    def _safe_write(key: str, func, record, filename):
+        """Call extraction function and write results, catching errors per-function."""
+        nonlocal errors
+        try:
+            result = func(record, filename)
+            if result is not None:
+                _write(key, result)
+        except Exception as e:
+            errors += 1
+            if errors <= 10:
+                print(f"    WARNING: {key} error (app={record.get('applicationNumberText','?')}): "
+                      f"{type(e).__name__}: {e}", file=sys.stderr)
+
     with zf.open(filename) as f:
         records = ijson.items(f, "patentFileWrapperDataBag.item")
         for record in records:
-            try:
-                if not isinstance(record, dict):
-                    errors += 1
-                    continue
-                app_num = (record.get("applicationNumberText") or "").strip()
-                if not app_num:
-                    continue
+            if not isinstance(record, dict):
+                errors += 1
+                continue
+            app_num = (record.get("applicationNumberText") or "").strip()
+            if not app_num:
+                continue
 
-                # 1. Biblio
+            # 1. Biblio (always try — most important)
+            try:
                 biblio = parse_biblio(record, filename)
                 if biblio["application_number"]:
                     _write("biblio", biblio)
-
-                # 2. Transactions
-                _write("transactions", parse_transactions(record, filename))
-
-                # 3. Parent continuity
-                _write("continuity", parse_continuity(record, filename))
-
-                # 4. Applicants
-                _write("applicants", parse_applicants(record, filename))
-
-                # 5. Inventors
-                _write("inventors", parse_inventors(record, filename))
-
-                # 6. Child continuity
-                _write("child_continuity", parse_child_continuity(record, filename))
-
-                # 7. Foreign priority
-                _write("foreign_priority", parse_foreign_priority(record, filename))
-
-                # 8. Publications
-                _write("publications", parse_publications(record, filename))
-
-                # 9. PTA summary (single row or None)
-                pta = parse_pta(record, filename)
-                if pta:
-                    _write("pta_summary", pta)
-
-                # 10. PTA history
-                _write("pta_history", parse_pta_history(record, filename))
-
-                # 11. Correspondence address
-                _write("correspondence", parse_correspondence_address(record, filename))
-
-                # 12. Attorneys
-                _write("attorneys", parse_attorneys(record, filename))
-
-                # 13. Document metadata
-                _write("doc_metadata", parse_document_metadata(record, filename))
-
-                # 14. Embedded assignments
-                _write("embedded_assignments", parse_embedded_assignments(record, filename))
-
             except Exception as e:
                 errors += 1
-                if errors <= 5:
-                    print(f"    WARNING: record error (app={app_num if 'app_num' in dir() else '?'}): {e}",
+                if errors <= 10:
+                    print(f"    WARNING: biblio error (app={app_num}): {type(e).__name__}: {e}",
                           file=sys.stderr)
-                continue
+
+            # 2-14: Each extraction isolated — one failure doesn't affect others
+            _safe_write("transactions", parse_transactions, record, filename)
+            _safe_write("continuity", parse_continuity, record, filename)
+            _safe_write("applicants", parse_applicants, record, filename)
+            _safe_write("inventors", parse_inventors, record, filename)
+            _safe_write("child_continuity", parse_child_continuity, record, filename)
+            _safe_write("foreign_priority", parse_foreign_priority, record, filename)
+            _safe_write("publications", parse_publications, record, filename)
+
+            # PTA summary (returns dict or None)
+            _safe_write("pta_summary", parse_pta, record, filename)
+
+            _safe_write("pta_history", parse_pta_history, record, filename)
+            _safe_write("correspondence", parse_correspondence_address, record, filename)
+            _safe_write("attorneys", parse_attorneys, record, filename)
+            _safe_write("doc_metadata", parse_document_metadata, record, filename)
+            _safe_write("embedded_assignments", parse_embedded_assignments, record, filename)
 
             if counts["biblio"] % 100000 == 0 and counts["biblio"] > 0:
                 print(f"    {counts['biblio']:,} apps, "
