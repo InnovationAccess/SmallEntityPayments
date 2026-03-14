@@ -18,10 +18,25 @@
 
 ## BigQuery Rules
 - ALL `bq` CLI commands MUST include `--location=us-west1` — omitting this causes silent failures
+- bq CLI flag syntax: use `--use_legacy_sql=false` (NOT `--nouse_legacy_sql` — that's invalid)
 - Upload files one at a time with `gsutil cp` (NOT `gsutil -m cp`) — parallel uploads cause failures
 - Load BQ files individually (NOT wildcard patterns like `*.jsonl.gz`)
 - Never concatenate `.gz` files — creates multi-stream gzip that BigQuery cannot read
 - Date values like `0000-01-01` cause BQ load failures — parsers must validate year range 1700-2100
+
+## Cloud Run Rules (learned from failures)
+- Cloud Run `/tmp` is backed by RAM (tmpfs) — downloading large files to `/tmp` consumes memory
+- For large files (>1 GB), set Cloud Run Job memory to at least 2x the file size + 2 GB for process overhead
+- Cloud Run resolves container image tags to digests at job UPDATE time, not execution time — after rebuilding a container, you MUST run `gcloud run jobs update --image=...` to pick up the new image
+- Delete large temp files immediately after use to free tmpfs memory (e.g., delete ZIP after parsing)
+- Delete output files after upload to GCS to free memory progressively
+
+## USPTO Data Parsing Rules (learned from failures)
+- USPTO bulk JSON has inconsistent types: fields named `*Bag` are usually arrays but sometimes dicts or scalars — always use `_as_list()` helper to normalize before iterating
+- When iterating bag items, always check `isinstance(item, dict)` before calling `.get()` — some bags contain strings or integers
+- Isolate each extraction function in its own try/except — never let one bad field in `parse_attorneys()` cause the record to be lost from `parse_biblio()`, `parse_transactions()`, etc.
+- `KeyError(0)` prints as just "0" — extremely hard to debug. This happens when `dict[0]` is called (treating dict as list). Always use `_as_list()` to prevent this
+- The USPTO API returns HTTP 429 (rate limited) — retry with backoff, don't assume the download URL is broken
 
 ## Architecture
 - Backend: Python 3.11 / FastAPI on Google Cloud Run (us-central1)
