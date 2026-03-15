@@ -431,8 +431,18 @@ def update_ptfwpre(work_dir: str) -> dict:
           file=sys.stderr)
     print("  WARNING: This is a large download and may take 1+ hours.", file=sys.stderr)
 
-    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        tmp_path = tmp.name
+    # Use mounted GCS volume (/mnt/ptfwpre) instead of tmpfs (/tmp) for large file download
+    # This avoids RAM consumption and allows processing with minimal memory
+    gcs_mount = "/mnt/ptfwpre"
+    if os.path.exists(gcs_mount):
+        # GCS volume is mounted — use it for large file downloads
+        tmp_path = os.path.join(gcs_mount, f"ptfwpre_{os.getpid()}.zip")
+        print(f"  Using GCS-backed volume mount at {gcs_mount}", file=sys.stderr)
+    else:
+        # Fallback to /tmp if volume mount isn't available (e.g. local testing)
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp_path = tmp.name
+        print(f"  GCS volume mount not available — using /tmp (will consume RAM)", file=sys.stderr)
 
     try:
         from etl.download_ptblxml import download_file
@@ -606,7 +616,13 @@ def main():
         sys.exit(1)
 
     source = sys.argv[1]
-    work_dir = os.environ.get("WORK_DIR", f"/tmp/update-{source}")
+
+    # For PTFWPRE, use GCS volume mount if available (to avoid RAM consumption)
+    if source == "ptfwpre" and os.path.exists("/mnt/ptfwpre"):
+        work_dir = "/mnt/ptfwpre/work"
+    else:
+        work_dir = os.environ.get("WORK_DIR", f"/tmp/update-{source}")
+
     os.makedirs(work_dir, exist_ok=True)
 
     run_id = str(uuid.uuid4())[:8]
