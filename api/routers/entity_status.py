@@ -365,7 +365,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "post_grant": {
                 "small": 0, "large": 0, "micro": 0, "total": 0,
                 "stol": 0, "ltos": 0, "stom": 0,
-                "declarations": 0,
+                "declarations": 0, "converted": 0,
             },
             "results": [],
         }
@@ -384,34 +384,44 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums),
     ]
     postgrant_sql = f"""
+    -- CTE avoids illegal aggregation-of-aggregation for change_date
+    WITH base AS (
+      SELECT
+        m.patent_number,
+        m.event_code,
+        m.event_date,
+        {DERIVE_STATUS_SQL} AS derived_status
+      FROM `{settings.maintenance_table}` m
+      WHERE m.patent_number IN UNNEST(@pn_list)
+        AND (
+          {DERIVE_STATUS_SQL} IS NOT NULL
+          OR m.event_code IN ('BIG.', 'SMAL', 'MICR', 'STOL', 'LTOS', 'STOM')
+        )
+    ),
+    first_status AS (
+      SELECT
+        patent_number,
+        ARRAY_AGG(derived_status ORDER BY event_date ASC LIMIT 1)[OFFSET(0)] AS first_status
+      FROM base
+      GROUP BY patent_number
+    )
     SELECT
-      m.patent_number,
-      ARRAY_AGG(
-        {DERIVE_STATUS_SQL} ORDER BY m.event_date ASC LIMIT 1
-      )[OFFSET(0)] AS first_maint_status,
-      ARRAY_AGG(
-        {DERIVE_STATUS_SQL} ORDER BY m.event_date DESC LIMIT 1
-      )[OFFSET(0)] AS latest_maint_status,
-      COUNTIF(m.event_code = 'BIG.')  AS decl_big,
-      COUNTIF(m.event_code = 'SMAL')  AS decl_smal,
-      COUNTIF(m.event_code = 'MICR')  AS decl_micr,
-      COUNTIF(m.event_code = 'STOL')  AS trans_stol,
-      COUNTIF(m.event_code = 'LTOS')  AS trans_ltos,
-      COUNTIF(m.event_code = 'STOM')  AS trans_stom,
+      b.patent_number,
+      f.first_status                                                          AS first_maint_status,
+      ARRAY_AGG(b.derived_status ORDER BY b.event_date DESC LIMIT 1)[OFFSET(0)] AS latest_maint_status,
+      COUNTIF(b.event_code = 'BIG.')  AS decl_big,
+      COUNTIF(b.event_code = 'SMAL')  AS decl_smal,
+      COUNTIF(b.event_code = 'MICR')  AS decl_micr,
+      COUNTIF(b.event_code = 'STOL')  AS trans_stol,
+      COUNTIF(b.event_code = 'LTOS')  AS trans_ltos,
+      COUNTIF(b.event_code = 'STOM')  AS trans_stom,
       MIN(CASE
-        WHEN {DERIVE_STATUS_SQL} IS NOT NULL
-          AND {DERIVE_STATUS_SQL} != ARRAY_AGG(
-            {DERIVE_STATUS_SQL} ORDER BY m.event_date ASC LIMIT 1
-          )[OFFSET(0)]
-        THEN m.event_date
+        WHEN b.derived_status IS NOT NULL AND b.derived_status != f.first_status
+        THEN b.event_date
       END) AS change_date
-    FROM `{settings.maintenance_table}` m
-    WHERE m.patent_number IN UNNEST(@pn_list)
-      AND (
-        {DERIVE_STATUS_SQL} IS NOT NULL
-        OR m.event_code IN ('BIG.', 'SMAL', 'MICR', 'STOL', 'LTOS', 'STOM')
-      )
-    GROUP BY m.patent_number
+    FROM base b
+    JOIN first_status f ON f.patent_number = b.patent_number
+    GROUP BY b.patent_number, f.first_status
     """ if pat_nums else None
 
     pg_by_patent = {}
