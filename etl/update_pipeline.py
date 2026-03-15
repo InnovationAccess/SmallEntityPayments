@@ -616,13 +616,9 @@ def main():
         sys.exit(1)
 
     source = sys.argv[1]
-
-    # For PTFWPRE, use GCS volume mount if available (to avoid RAM consumption)
-    if source == "ptfwpre" and os.path.exists("/mnt/ptfwpre"):
-        work_dir = "/mnt/ptfwpre/work"
-    else:
-        work_dir = os.environ.get("WORK_DIR", f"/tmp/update-{source}")
-
+    # Use /tmp for work directory (persists across invocations)
+    # GCS mount (/mnt/ptfwpre) is ephemeral and only used for large temp files
+    work_dir = os.environ.get("WORK_DIR", f"/tmp/update-{source}")
     os.makedirs(work_dir, exist_ok=True)
 
     run_id = str(uuid.uuid4())[:8]
