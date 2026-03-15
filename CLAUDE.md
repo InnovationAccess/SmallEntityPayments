@@ -23,6 +23,10 @@
 - Load BQ files individually (NOT wildcard patterns like `*.jsonl.gz`)
 - Never concatenate `.gz` files — creates multi-stream gzip that BigQuery cannot read
 - Date values like `0000-01-01` cause BQ load failures — parsers must validate year range 1700-2100
+- When adding new columns to parser output, ALWAYS `ALTER TABLE ADD COLUMN` before loading — BQ rejects JSON fields not in the table schema ("No such field" error)
+- Use `--schema_update_option=ALLOW_FIELD_ADDITION` in `bq load` to auto-add new fields
+- NEVER truncate a table and reload from only the latest data file — if the data source provides partial updates (e.g., PTFWPRE only covers recent years), use targeted `DELETE WHERE source_file IN (...)` to preserve historical data
+- `bq load --nosync` returns immediately without waiting for the load to complete — load failures are silent. Always verify row counts after loading
 
 ## Cloud Run Rules (learned from failures)
 - Cloud Run `/tmp` is backed by RAM (tmpfs) — downloading large files to `/tmp` consumes memory

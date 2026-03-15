@@ -65,13 +65,18 @@ def gsutil_upload(local_path: str, gcs_path: str) -> bool:
 
 
 def bq_load(gcs_path: str, table: str) -> bool:
-    """Submit async BigQuery load job. Returns True on success."""
+    """Submit async BigQuery load job. Returns True on success.
+
+    Uses --schema_update_option=ALLOW_FIELD_ADDITION so new columns
+    added to the parser don't cause 'No such field' load failures.
+    """
     full_table = f"{GCP_PROJECT}:{BQ_DATASET}.{table}"
     result = run_cmd([
         "bq", "load", "--nosync",
         f"--project_id={GCP_PROJECT}",
         f"--location={BQ_LOCATION}",
         "--source_format=NEWLINE_DELIMITED_JSON",
+        "--schema_update_option=ALLOW_FIELD_ADDITION",
         full_table, gcs_path,
     ])
     return result.returncode == 0
@@ -382,8 +387,10 @@ def update_ptmnfee2(work_dir: str) -> dict:
 def update_ptfwpre(work_dir: str) -> dict:
     """Download latest PTFWPRE file and reload patent file wrapper tables.
 
-    PTFWPRE files are large (~2-6 GB ZIPs) and contain complete snapshots.
-    We process the most recent one and do a full table replacement.
+    PTFWPRE ZIPs contain year files (e.g. 2021.json-2026.json) — NOT the full
+    historical dataset. We only delete rows for the years covered by the latest
+    ZIP, then load the new data. This preserves older data from the original
+    backfill (2001-2020) that isn't included in the latest ZIP.
     """
     import requests
     from etl.parse_pfw import parse_zip as parse_pfw_zip
@@ -433,6 +440,13 @@ def update_ptfwpre(work_dir: str) -> dict:
             stats["failed"] = 1
             return stats
 
+        # Determine which year files are in the ZIP BEFORE parsing
+        # (we need this list for targeted deletes, and the ZIP gets deleted after parsing)
+        import zipfile
+        with zipfile.ZipFile(tmp_path, "r") as probe_zf:
+            year_files = [n for n in probe_zf.namelist() if n.endswith(".json")]
+        print(f"  ZIP contains {len(year_files)} year files: {sorted(year_files)}", file=sys.stderr)
+
         counts = parse_pfw_zip(tmp_path, work_dir)
         total_rows = sum(counts.values())
         print(f"  Parsed: biblio={counts.get('biblio',0):,}, "
@@ -447,7 +461,10 @@ def update_ptfwpre(work_dir: str) -> dict:
             os.unlink(tmp_path)
             print(f"  Deleted ZIP ({zip_size_gb:.1f} GB) to free tmpfs memory", file=sys.stderr)
 
-        # All 14 PTFWPRE tables — truncate before reload (full replacement)
+        # Build SQL IN clause for source_file matching
+        source_file_list = ", ".join(f"'{yf}'" for yf in year_files)
+
+        # All 14 PTFWPRE tables — delete only rows from years in this ZIP
         PTFWPRE_TABLES = [
             "patent_file_wrapper_v2",
             "pfw_transactions",
@@ -465,12 +482,13 @@ def update_ptfwpre(work_dir: str) -> dict:
             "pfw_embedded_assignments",
         ]
         for table in PTFWPRE_TABLES:
-            print(f"  Truncating {table}...", file=sys.stderr)
+            print(f"  Deleting rows from {table} where source_file IN ({', '.join(year_files)})...",
+                  file=sys.stderr)
             try:
-                bq_query(f"TRUNCATE TABLE `{BQ_DATASET}.{table}`")
+                bq_query(f"DELETE FROM `{BQ_DATASET}.{table}` WHERE source_file IN ({source_file_list})")
             except Exception as e:
-                # Table may not exist yet on first run — skip truncation
-                print(f"    Warning: Could not truncate {table}: {e}", file=sys.stderr)
+                # Table may not exist yet on first run — skip deletion
+                print(f"    Warning: Could not delete from {table}: {e}", file=sys.stderr)
 
         # All 14 output file patterns → BQ table mappings
         import glob
