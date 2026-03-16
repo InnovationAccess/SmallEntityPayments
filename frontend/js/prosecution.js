@@ -18,6 +18,7 @@ const entityLimitInput = document.getElementById('px-entity-limit');
 const prosecutionBtn  = document.getElementById('px-prosecution-btn');
 const postGrantBtn    = document.getElementById('px-postgrant-btn');
 const combinedBtn     = document.getElementById('px-combined-btn');
+const thirdSmallBtn   = document.getElementById('px-3rd-payment-btn');
 const entityResultsEl = document.getElementById('px-entity-results');
 
 const phase2Card      = document.getElementById('px-phase2');
@@ -41,7 +42,7 @@ const extractResultsEl = document.getElementById('px-extract-results');
 const statusMsg       = document.getElementById('px-status');
 
 let selectedEntity = null;
-let currentMode = 'prosecution'; // 'prosecution', 'post-grant', or 'combined'
+let currentMode = 'prosecution'; // 'prosecution', 'post-grant', 'combined', or '3rd-small'
 
 // Module-level sets so Phase 3 can access Phase 2 selections
 let selectedAppRows = new Set();
@@ -53,11 +54,13 @@ let docResultsList = [];  // full list from Phase 3a
 prosecutionBtn.addEventListener('click', () => discoverEntities('prosecution'));
 postGrantBtn.addEventListener('click', () => discoverEntities('post-grant'));
 combinedBtn.addEventListener('click', () => discoverEntities('combined'));
+thirdSmallBtn.addEventListener('click', () => discoverEntities('3rd-small'));
 
 const MODE_CONFIG = {
   'prosecution':  { btn: prosecutionBtn,  endpoint: '/api/prosecution/entities',            msg: 'Searching for entities with SMAL declarations...' },
   'post-grant':   { btn: postGrantBtn,    endpoint: '/api/prosecution/entities/post-grant',  msg: 'Searching for entities with small entity maintenance fee payments...' },
   'combined':     { btn: combinedBtn,     endpoint: '/api/prosecution/entities/combined',    msg: 'Searching prosecution and post-grant activities...' },
+  '3rd-small':    { btn: thirdSmallBtn,   endpoint: '/api/prosecution/entities/3rd-small',   msg: 'Searching for 3rd maintenance fee payments at small entity rate (M2553)...' },
 };
 
 async function discoverEntities(mode) {
@@ -106,6 +109,7 @@ function renderEntityResults(data) {
     'prosecution': `Entities with ≥${data.min_declarations.toLocaleString()} SMAL Declarations`,
     'post-grant':  `Entities with ≥${data.min_declarations.toLocaleString()} Small Entity Maintenance Events`,
     'combined':    `Entities with ≥${data.min_declarations.toLocaleString()} Total Small Entity Events`,
+    '3rd-small':   `Entities with ≥${data.min_declarations.toLocaleString()} 3rd Maintenance Fee Payments @ Small Rate (M2553)`,
   };
 
   let html = `
@@ -152,6 +156,13 @@ function renderEntityResults(data) {
           <th data-sort-key="${colIdx++}">Earliest</th>
           <th data-sort-key="${colIdx++}">Latest</th>
     `;
+  } else if (mode === '3rd-small') {
+    html += `
+          <th data-sort-key="${colIdx++}">3rd Payments (M2553)</th>
+          <th data-sort-key="${colIdx++}">Patents</th>
+          <th data-sort-key="${colIdx++}">Earliest</th>
+          <th data-sort-key="${colIdx++}">Latest</th>
+    `;
   } else {
     html += `
           <th data-sort-key="${colIdx++}">SMAL Count</th>
@@ -190,6 +201,10 @@ function renderEntityResults(data) {
         <td>${r.large_3rd.toLocaleString()}</td>
         <td>${r.small_decl_total.toLocaleString()}</td>
         <td>${r.large_decl_total.toLocaleString()}</td>
+        <td>${r.patent_count.toLocaleString()}</td>`;
+    } else if (mode === '3rd-small') {
+      html += `
+        <td>${r.m2553_count.toLocaleString()}</td>
         <td>${r.patent_count.toLocaleString()}</td>`;
     } else {
       html += `

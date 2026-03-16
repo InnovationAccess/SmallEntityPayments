@@ -412,6 +412,84 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
     }
 
 
+# ── Phase 1d: 3rd maintenance fee payments at small entity rate ──
+
+@router.post("/entities/3rd-small")
+def discover_3rd_small_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
+    """
+    Find entities with the most 3rd maintenance fee payments (11.5yr) at small
+    entity rates (M2553).  Strategic signal: the 3rd maintenance fee is so
+    expensive that paying it indicates the patent generates revenue.
+    """
+    if req.min_declarations < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_declarations must be >= 1",
+        )
+
+    sql = f"""
+        WITH m2553_events AS (
+            SELECT
+                m.patent_number,
+                m.event_date
+            FROM `{settings.maintenance_table}` m
+            WHERE m.event_code = 'M2553'
+        ),
+        with_applicant AS (
+            SELECT
+                e.patent_number,
+                e.event_date,
+                COALESCE(
+                    nu.representative_name,
+                    p.first_applicant_name,
+                    p.first_inventor_name,
+                    'UNKNOWN'
+                ) AS applicant_name
+            FROM m2553_events e
+            LEFT JOIN `{settings.patent_table}` p
+                ON e.patent_number = p.patent_number
+            LEFT JOIN `{settings.unification_table}` nu
+                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
+                    = nu.associated_name
+        )
+        SELECT
+            applicant_name,
+            COUNT(*) AS m2553_count,
+            COUNT(DISTINCT patent_number) AS patent_count,
+            MIN(event_date) AS earliest_date,
+            MAX(event_date) AS latest_date
+        FROM with_applicant
+        GROUP BY applicant_name
+        HAVING COUNT(*) >= @min_decl
+        ORDER BY m2553_count DESC
+        LIMIT @lim
+    """
+
+    params = [
+        bigquery.ScalarQueryParameter("min_decl", "INT64", req.min_declarations),
+        bigquery.ScalarQueryParameter("lim", "INT64", req.limit),
+    ]
+
+    rows = bq_service.run_query(sql, params)
+
+    results = []
+    for r in rows:
+        results.append({
+            "applicant_name": r["applicant_name"],
+            "m2553_count": r["m2553_count"],
+            "patent_count": r["patent_count"],
+            "earliest_date": str(r["earliest_date"]) if r["earliest_date"] else None,
+            "latest_date": str(r["latest_date"]) if r["latest_date"] else None,
+        })
+
+    return {
+        "total": len(results),
+        "min_declarations": req.min_declarations,
+        "mode": "3rd-small",
+        "results": results,
+    }
+
+
 # ── Phase 2: Application drill-down ─────────────────────────────
 
 @router.post("/applications")
