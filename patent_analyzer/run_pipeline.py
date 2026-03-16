@@ -77,10 +77,13 @@ def analyze_company(ticker: str, company_info: dict, analysis_date: str) -> dict
         "gist": "",
         "secretary_name": None,
         "secretary_title": None,
+        "secretary_email": None,
         "general_counsel_name": None,
         "general_counsel_title": None,
+        "general_counsel_email": None,
         "board_chair_name": None,
         "board_chair_title": None,
+        "board_chair_email": None,
         "ceo_name": None,
         "cfo_name": None,
         "board_members_json": "[]",
@@ -187,7 +190,14 @@ def analyze_company(ticker: str, company_info: dict, analysis_date: str) -> dict
         try:
             officers = enrich_contacts(company_name, ticker, officers)
             result["apollo_enriched"] = True
-            # Update board_members_json with enriched data
+            # Copy enriched emails back to result for officer columns
+            if officers.get("secretary") and officers["secretary"].get("email"):
+                result["secretary_email"] = officers["secretary"]["email"]
+            if officers.get("general_counsel") and officers["general_counsel"].get("email"):
+                result["general_counsel_email"] = officers["general_counsel"]["email"]
+            if officers.get("board_chair") and officers["board_chair"].get("email"):
+                result["board_chair_email"] = officers["board_chair"]["email"]
+            # Update board_members_json with enriched data (includes director emails)
             result["board_members_json"] = json.dumps(officers.get("directors", []))
             log.info("  Apollo enrichment complete")
         except Exception as e:

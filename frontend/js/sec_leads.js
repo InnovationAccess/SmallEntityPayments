@@ -129,15 +129,19 @@ function renderTable(results) {
     // Determine primary contact
     let contactName = '';
     let contactTitle = '';
+    let contactEmail = '';
     if (r.secretary_name) {
       contactName = r.secretary_name;
       contactTitle = r.secretary_title || 'Corporate Secretary';
+      contactEmail = r.secretary_email || '';
     } else if (r.general_counsel_name) {
       contactName = r.general_counsel_name;
       contactTitle = r.general_counsel_title || 'General Counsel';
+      contactEmail = r.general_counsel_email || '';
     } else if (r.board_chair_name) {
       contactName = r.board_chair_name;
       contactTitle = r.board_chair_title || 'Board Chair';
+      contactEmail = r.board_chair_email || '';
     }
 
     // Parse board members for the new column
@@ -172,7 +176,7 @@ function renderTable(results) {
       <td><a href="${escHtml(r.filing_url || '')}" target="_blank" rel="noopener">View 10-K on SEC</a></td>
       <td><span class="sec-score-badge" style="background:${color};">${r.score}</span></td>
       <td class="sec-gist-cell">${escHtml(r.gist || '')}</td>
-      <td><strong>${escHtml(contactName)}</strong><br>${escHtml(contactTitle)}</td>
+      <td><strong>${escHtml(contactName)}</strong><br>${escHtml(contactTitle)}${contactEmail ? '<br><a href="mailto:' + escHtml(contactEmail) + '" class="sec-board-email">' + escHtml(contactEmail) + '</a>' : ''}</td>
       <td class="sec-board-cell">${boardHtml}</td>
       <td><button class="btn btn-primary btn-sm sec-memo-btn" data-ticker="${ticker}" data-date="${escHtml(r.analysis_date || '')}" data-company="${escHtml(r.company_name || '')}"${hasMemo}>Memo</button></td>
       <td><button class="btn-purple btn-sm sec-letter-btn" data-ticker="${ticker}" data-date="${escHtml(r.analysis_date || '')}" data-company="${escHtml(r.company_name || '')}"${hasLetter}>Letter</button></td>
