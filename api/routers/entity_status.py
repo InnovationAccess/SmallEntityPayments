@@ -55,7 +55,7 @@ class ConversionSearchRequest(BaseModel):
 
 class ApplicantRequest(BaseModel):
     applicant_name: str
-    limit: int = 5000
+    limit: int = 50000
 
 
 # ── Endpoints ─────────────────────────────────────────────────────
@@ -318,12 +318,11 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         params.append(bigquery.ScalarQueryParameter("name_0", "STRING", req.applicant_name))
         name_in = "@name_0"
 
-    params.append(bigquery.ScalarQueryParameter("limit", "INT64", min(req.limit, 10000)))
-
     # ── Query 1: Portfolio assembly ────────────────────────────────
-    # Find all application_numbers where entity appears as applicant,
-    # inventor, or assignee.  Includes first_applicant_name as fallback
-    # (works even when pfw_applicants is empty before first pipeline run).
+    # Find ALL application_numbers where entity appears as applicant,
+    # inventor, or assignee.  No LIMIT here — aggregate dashboard stats
+    # must reflect the complete portfolio.  The detailed results list
+    # is trimmed to req.limit at the end.
     portfolio_sql = f"""
     WITH portfolio_apps AS (
       SELECT DISTINCT application_number
@@ -350,7 +349,6 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     FROM `{settings.patent_table}` p
     WHERE p.application_number IN (SELECT application_number FROM portfolio_apps)
     ORDER BY p.grant_date DESC NULLS LAST
-    LIMIT @limit
     """
     portfolio_rows = bq_service.run_query(portfolio_sql, params)
 
@@ -457,7 +455,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
 
     # ── Query 4: Sold count ────────────────────────────────────────
     # Patents where the entity appears as assignOR (transferred away).
-    sold_params = list(params[:-1])  # reuse name params, drop limit
+    sold_params = list(params)  # reuse name params
     sold_sql = f"""
     SELECT COUNT(DISTINCT d.application_number) AS sold_count
     FROM `{settings.assign_documents_table}` d
@@ -475,6 +473,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     results = []
     total_patents = 0
     total_applications = len(portfolio_rows)
+    display_limit = min(req.limit, 50000)
     # Dashboard accumulators — prosecution
     pros_small = 0
     pros_large = 0
@@ -544,19 +543,21 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             changed = True
             change_phase = "prosecution"
 
-        results.append({
-            "patent_number": pat_num,
-            "application_number": app_num,
-            "invention_title": r.get("invention_title"),
-            "filing_date": _fmt_date(r.get("filing_date")),
-            "grant_date": _fmt_date(r.get("grant_date")),
-            "prosecution_status": pros_status,
-            "post_grant_first": pg_first,
-            "post_grant_current": pg_latest or pg_first,
-            "status_changed": changed,
-            "change_date": _fmt_date(pg_change),
-            "change_phase": change_phase,
-        })
+        # Only add to detailed results up to display_limit
+        if len(results) < display_limit:
+            results.append({
+                "patent_number": pat_num,
+                "application_number": app_num,
+                "invention_title": r.get("invention_title"),
+                "filing_date": _fmt_date(r.get("filing_date")),
+                "grant_date": _fmt_date(r.get("grant_date")),
+                "prosecution_status": pros_status,
+                "post_grant_first": pg_first,
+                "post_grant_current": pg_latest or pg_first,
+                "status_changed": changed,
+                "change_date": _fmt_date(pg_change),
+                "change_phase": change_phase,
+            })
 
     return {
         "applicant_name": req.applicant_name,

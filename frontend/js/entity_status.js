@@ -313,7 +313,7 @@ async function loadApplicantPortfolio() {
   try {
     const data = await apiPost('/api/entity-status/by-applicant', {
       applicant_name: name,
-      limit: 5000,
+      limit: 50000,
     });
     renderApplicantPortfolio(data);
   } catch (err) {
