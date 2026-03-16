@@ -529,7 +529,7 @@ def list_applications(req: ApplicationDrilldownRequest) -> Dict[str, Any]:
         params.append(bigquery.ScalarQueryParameter(
             "applicant", "STRING", req.applicant_name.strip().upper(),
         ))
-        applicant_filter = "UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name, '')) LIKE CONCAT('%', @applicant, '%')"
+        applicant_filter = "UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name, '')) = @applicant"
 
     sql = f"""
         WITH smal_events AS (
