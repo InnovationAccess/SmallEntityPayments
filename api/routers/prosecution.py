@@ -160,12 +160,16 @@ def discover_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
 @router.post("/entities/post-grant")
 def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
     """
-    Find entities that have paid maintenance fees at small entity rates.
-    Searches maintenance_fee_events_v2 for M2xxx/F27xx event codes.
+    Find entities with post-grant small entity activity in maintenance fees.
 
-    Returns two count columns:
-      - small_decl_count: total count of all small-entity-related events
-      - small_payment_count: count of core maintenance fee payments (M2551/M2552/M2553)
+    Searches maintenance_fee_events_v2 for small + large entity fee payments
+    and entity status declarations (SMAL, BIG., LTOS, STOL).
+
+    Returns detailed breakdown columns:
+      - small_1st/2nd/3rd: M2551/M2552/M2553 payment counts
+      - large_1st/2nd/3rd: M1551/M1552/M1553 payment counts
+      - small_decl_total: post-grant SMALL declarations (SMAL, LTOS events)
+      - large_decl_total: post-grant LARGE declarations (BIG., STOL events)
     """
     if req.min_declarations < 1:
         raise HTTPException(
@@ -174,43 +178,60 @@ def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
         )
 
     sql = f"""
-        WITH small_maint AS (
+        WITH maint_events AS (
             SELECT
                 m.patent_number,
                 m.event_code,
                 m.event_date
             FROM `{settings.maintenance_table}` m
-            WHERE (m.event_code LIKE 'M2%' OR m.event_code LIKE 'F27%')
+            WHERE m.event_code LIKE 'M1%'
+               OR m.event_code LIKE 'M2%'
+               OR m.event_code LIKE 'F17%'
+               OR m.event_code LIKE 'F27%'
+               OR m.event_code IN ('SMAL', 'BIG.', 'LTOS', 'STOL')
         ),
         with_applicant AS (
             SELECT
-                sm.patent_number,
-                sm.event_code,
-                sm.event_date,
+                me.patent_number,
+                me.event_code,
+                me.event_date,
                 COALESCE(
                     nu.representative_name,
                     p.first_applicant_name,
                     p.first_inventor_name,
                     'UNKNOWN'
                 ) AS applicant_name
-            FROM small_maint sm
+            FROM maint_events me
             LEFT JOIN `{settings.patent_table}` p
-                ON sm.patent_number = p.patent_number
+                ON me.patent_number = p.patent_number
             LEFT JOIN `{settings.unification_table}` nu
                 ON COALESCE(p.first_applicant_name, p.first_inventor_name)
                     = nu.associated_name
         )
         SELECT
             applicant_name,
-            COUNT(*) AS small_decl_count,
-            COUNT(CASE WHEN event_code IN ('M2551', 'M2552', 'M2553') THEN 1 END) AS small_payment_count,
+            -- Small entity maintenance fee payments
+            COUNT(CASE WHEN event_code = 'M2551' THEN 1 END) AS small_1st,
+            COUNT(CASE WHEN event_code = 'M2552' THEN 1 END) AS small_2nd,
+            COUNT(CASE WHEN event_code = 'M2553' THEN 1 END) AS small_3rd,
+            -- Large entity maintenance fee payments
+            COUNT(CASE WHEN event_code = 'M1551' THEN 1 END) AS large_1st,
+            COUNT(CASE WHEN event_code = 'M1552' THEN 1 END) AS large_2nd,
+            COUNT(CASE WHEN event_code = 'M1553' THEN 1 END) AS large_3rd,
+            -- Post-grant entity status declarations
+            COUNT(CASE WHEN event_code IN ('SMAL', 'LTOS') THEN 1 END) AS small_decl_total,
+            COUNT(CASE WHEN event_code IN ('BIG.', 'STOL') THEN 1 END) AS large_decl_total,
+            -- Summary
             COUNT(DISTINCT patent_number) AS patent_count,
             MIN(event_date) AS earliest_date,
             MAX(event_date) AS latest_date
         FROM with_applicant
         GROUP BY applicant_name
-        HAVING COUNT(*) >= @min_decl
-        ORDER BY small_decl_count DESC
+        HAVING (
+            COUNT(CASE WHEN event_code LIKE 'M2%' OR event_code LIKE 'F27%'
+                         OR event_code IN ('SMAL', 'LTOS') THEN 1 END)
+        ) >= @min_decl
+        ORDER BY small_1st + small_2nd + small_3rd DESC
         LIMIT @lim
     """
 
@@ -225,8 +246,14 @@ def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
     for r in rows:
         results.append({
             "applicant_name": r["applicant_name"],
-            "small_decl_count": r["small_decl_count"],
-            "small_payment_count": r["small_payment_count"],
+            "small_1st": r["small_1st"],
+            "small_2nd": r["small_2nd"],
+            "small_3rd": r["small_3rd"],
+            "large_1st": r["large_1st"],
+            "large_2nd": r["large_2nd"],
+            "large_3rd": r["large_3rd"],
+            "small_decl_total": r["small_decl_total"],
+            "large_decl_total": r["large_decl_total"],
             "patent_count": r["patent_count"],
             "earliest_date": str(r["earliest_date"]) if r["earliest_date"] else None,
             "latest_date": str(r["latest_date"]) if r["latest_date"] else None,

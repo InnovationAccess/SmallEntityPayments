@@ -117,11 +117,17 @@ function renderEntityResults(data) {
 
   if (isPostGrant) {
     html += `
-          <th data-sort-key="1">Small Declarations</th>
-          <th data-sort-key="2">Small Payments</th>
-          <th data-sort-key="3">Patents</th>
-          <th data-sort-key="4">Earliest</th>
-          <th data-sort-key="5">Latest</th>
+          <th data-sort-key="1">Small 1st</th>
+          <th data-sort-key="2">Small 2nd</th>
+          <th data-sort-key="3">Small 3rd</th>
+          <th data-sort-key="4">Large 1st</th>
+          <th data-sort-key="5">Large 2nd</th>
+          <th data-sort-key="6">Large 3rd</th>
+          <th data-sort-key="7">Small Decl</th>
+          <th data-sort-key="8">Large Decl</th>
+          <th data-sort-key="9">Patents</th>
+          <th data-sort-key="10">Earliest</th>
+          <th data-sort-key="11">Latest</th>
     `;
   } else {
     html += `
@@ -140,8 +146,14 @@ function renderEntityResults(data) {
 
     if (isPostGrant) {
       html += `
-        <td>${r.small_decl_count.toLocaleString()}</td>
-        <td>${r.small_payment_count.toLocaleString()}</td>
+        <td>${r.small_1st.toLocaleString()}</td>
+        <td>${r.small_2nd.toLocaleString()}</td>
+        <td>${r.small_3rd.toLocaleString()}</td>
+        <td>${r.large_1st.toLocaleString()}</td>
+        <td>${r.large_2nd.toLocaleString()}</td>
+        <td>${r.large_3rd.toLocaleString()}</td>
+        <td>${r.small_decl_total.toLocaleString()}</td>
+        <td>${r.large_decl_total.toLocaleString()}</td>
         <td>${r.patent_count.toLocaleString()}</td>`;
     } else {
       html += `
