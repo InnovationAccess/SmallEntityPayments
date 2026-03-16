@@ -196,12 +196,9 @@ def analyze_company(ticker: str, company_info: dict, analysis_date: str) -> dict
     return result
 
 
-def _store_results(results: list[dict], analysis_date: str):
-    """Store results to BigQuery sec_leads_results table."""
-    client = bigquery.Client(project=GCP_PROJECT)
+def _clear_date(client: bigquery.Client, analysis_date: str):
+    """Delete existing rows for this date (idempotent re-runs)."""
     table_id = f"{GCP_PROJECT}.{BQ_DATASET}.sec_leads_results"
-
-    # Delete existing rows for this date (idempotent re-runs)
     delete_sql = f"""
     DELETE FROM `{table_id}`
     WHERE analysis_date = @analysis_date
@@ -217,23 +214,18 @@ def _store_results(results: list[dict], analysis_date: str):
     except Exception as e:
         log.warning("Delete failed (table may not exist yet): %s", e)
 
-    # Insert new rows
-    rows_to_insert = []
-    for r in results:
-        row = dict(r)
-        # Convert None to appropriate defaults for BQ
-        row.setdefault("apollo_enriched", False)
-        rows_to_insert.append(row)
 
-    if not rows_to_insert:
-        log.info("No results to store")
-        return
+def _store_one_result(client: bigquery.Client, result: dict):
+    """Insert a single company result to BigQuery immediately."""
+    table_id = f"{GCP_PROJECT}.{BQ_DATASET}.sec_leads_results"
+    row = dict(result)
+    row.setdefault("apollo_enriched", False)
 
-    errors = client.insert_rows_json(table_id, rows_to_insert)
+    errors = client.insert_rows_json(table_id, [row])
     if errors:
-        log.error("BigQuery insert errors: %s", errors[:5])
+        log.error("BigQuery insert error for %s: %s", result.get("ticker", "?"), errors)
     else:
-        log.info("Stored %d results to BigQuery", len(rows_to_insert))
+        log.info("  → Stored %s to BigQuery (score %d)", result.get("ticker", "?"), result.get("score", 0))
 
 
 def run_date_analysis(filing_date: str) -> dict:
@@ -257,7 +249,11 @@ def run_date_analysis(filing_date: str) -> dict:
         log.info("No 10-K filings found for %s", filing_date)
         return {"analyzed": 0, "scored_5plus": 0, "errors": 0, "gcs_path": None}
 
-    # Step 2: Process each company sequentially
+    # Create BQ client once, clear existing rows for idempotent re-runs
+    bq_client = bigquery.Client(project=GCP_PROJECT)
+    _clear_date(bq_client, filing_date)
+
+    # Step 2: Process each company sequentially, storing immediately
     results = []
     errors = 0
     for i, filer in enumerate(filers, 1):
@@ -268,17 +264,16 @@ def run_date_analysis(filing_date: str) -> dict:
             result = analyze_company(ticker, filer, filing_date)
             if result:
                 results.append(result)
+                # Store to BigQuery immediately so frontend updates in real time
+                try:
+                    _store_one_result(bq_client, result)
+                except Exception as e:
+                    log.error("Failed to store %s to BigQuery: %s", ticker, e)
         except Exception as e:
             log.error("UNHANDLED ERROR analyzing %s: %s", ticker, e, exc_info=True)
             errors += 1
 
     log.info("\nAll companies processed: %d results, %d errors", len(results), errors)
-
-    # Step 3: Store to BigQuery
-    try:
-        _store_results(results, filing_date)
-    except Exception as e:
-        log.error("Failed to store results to BigQuery: %s", e)
 
     # Step 4: Generate and upload HTML report
     gcs_path = None
