@@ -17,6 +17,7 @@ const minDeclInput    = document.getElementById('px-min-decl');
 const entityLimitInput = document.getElementById('px-entity-limit');
 const prosecutionBtn  = document.getElementById('px-prosecution-btn');
 const postGrantBtn    = document.getElementById('px-postgrant-btn');
+const combinedBtn     = document.getElementById('px-combined-btn');
 const entityResultsEl = document.getElementById('px-entity-results');
 
 const phase2Card      = document.getElementById('px-phase2');
@@ -40,7 +41,7 @@ const extractResultsEl = document.getElementById('px-extract-results');
 const statusMsg       = document.getElementById('px-status');
 
 let selectedEntity = null;
-let currentMode = 'prosecution'; // 'prosecution' or 'post-grant'
+let currentMode = 'prosecution'; // 'prosecution', 'post-grant', or 'combined'
 
 // Module-level sets so Phase 3 can access Phase 2 selections
 let selectedAppRows = new Set();
@@ -51,18 +52,23 @@ let docResultsList = [];  // full list from Phase 3a
 
 prosecutionBtn.addEventListener('click', () => discoverEntities('prosecution'));
 postGrantBtn.addEventListener('click', () => discoverEntities('post-grant'));
+combinedBtn.addEventListener('click', () => discoverEntities('combined'));
+
+const MODE_CONFIG = {
+  'prosecution':  { btn: prosecutionBtn,  endpoint: '/api/prosecution/entities',            msg: 'Searching for entities with SMAL declarations...' },
+  'post-grant':   { btn: postGrantBtn,    endpoint: '/api/prosecution/entities/post-grant',  msg: 'Searching for entities with small entity maintenance fee payments...' },
+  'combined':     { btn: combinedBtn,     endpoint: '/api/prosecution/entities/combined',    msg: 'Searching prosecution and post-grant activities...' },
+};
 
 async function discoverEntities(mode) {
   currentMode = mode;
   const minDecl = parseInt(minDeclInput.value) || 1000;
   const limit = parseInt(entityLimitInput.value) || 200;
 
-  const activeBtn = mode === 'prosecution' ? prosecutionBtn : postGrantBtn;
-  setLoading(activeBtn, true);
+  const cfg = MODE_CONFIG[mode];
+  setLoading(cfg.btn, true);
   entityResultsEl.classList.remove('hidden');
-  entityResultsEl.innerHTML = mode === 'prosecution'
-    ? '<p class="text-muted">Searching for entities with SMAL declarations...</p>'
-    : '<p class="text-muted">Searching for entities with small entity maintenance fee payments...</p>';
+  entityResultsEl.innerHTML = `<p class="text-muted">${cfg.msg}</p>`;
 
   // Hide phases 2+3 when running a new discovery
   phase2Card.classList.add('hidden');
@@ -70,9 +76,7 @@ async function discoverEntities(mode) {
   hidePhase3();
   selectedEntity = null;
 
-  const endpoint = mode === 'prosecution'
-    ? '/api/prosecution/entities'
-    : '/api/prosecution/entities/post-grant';
+  const endpoint = cfg.endpoint;
 
   try {
     const data = await apiPost(endpoint, {
@@ -86,7 +90,7 @@ async function discoverEntities(mode) {
     entityResultsEl.innerHTML = '';
     entityResultsEl.classList.add('hidden');
   } finally {
-    setLoading(activeBtn, false);
+    setLoading(cfg.btn, false);
   }
 }
 
@@ -97,15 +101,16 @@ function renderEntityResults(data) {
   }
 
   const mode = data._mode || data.mode || 'prosecution';
-  const isPostGrant = mode === 'post-grant';
 
-  const headerLabel = isPostGrant
-    ? `Entities with ≥${data.min_declarations.toLocaleString()} Small Entity Maintenance Events`
-    : `Entities with ≥${data.min_declarations.toLocaleString()} SMAL Declarations`;
+  const headerLabels = {
+    'prosecution': `Entities with ≥${data.min_declarations.toLocaleString()} SMAL Declarations`,
+    'post-grant':  `Entities with ≥${data.min_declarations.toLocaleString()} Small Entity Maintenance Events`,
+    'combined':    `Entities with ≥${data.min_declarations.toLocaleString()} Total Small Entity Events`,
+  };
 
   let html = `
     <div class="results-header">
-      <strong>${headerLabel}</strong>
+      <strong>${headerLabels[mode] || headerLabels.prosecution}</strong>
       <span class="results-count">${data.total} entities found</span>
     </div>
     <p class="px-hint">Click an entity row to select it for Phase 2 drill-down.</p>
@@ -115,26 +120,44 @@ function renderEntityResults(data) {
           <th data-sort-key="0">Applicant Name</th>
   `;
 
-  if (isPostGrant) {
+  let colIdx = 1;
+  if (mode === 'combined') {
+    // Prosecution columns first, then post-grant
     html += `
-          <th data-sort-key="1">Small 1st</th>
-          <th data-sort-key="2">Small 2nd</th>
-          <th data-sort-key="3">Small 3rd</th>
-          <th data-sort-key="4">Large 1st</th>
-          <th data-sort-key="5">Large 2nd</th>
-          <th data-sort-key="6">Large 3rd</th>
-          <th data-sort-key="7">Small Decl</th>
-          <th data-sort-key="8">Large Decl</th>
-          <th data-sort-key="9">Patents</th>
-          <th data-sort-key="10">Earliest</th>
-          <th data-sort-key="11">Latest</th>
+          <th data-sort-key="${colIdx++}">SMAL Count</th>
+          <th data-sort-key="${colIdx++}">Applications</th>
+          <th data-sort-key="${colIdx++}">Small 1st</th>
+          <th data-sort-key="${colIdx++}">Small 2nd</th>
+          <th data-sort-key="${colIdx++}">Small 3rd</th>
+          <th data-sort-key="${colIdx++}">Large 1st</th>
+          <th data-sort-key="${colIdx++}">Large 2nd</th>
+          <th data-sort-key="${colIdx++}">Large 3rd</th>
+          <th data-sort-key="${colIdx++}">Small Decl</th>
+          <th data-sort-key="${colIdx++}">Large Decl</th>
+          <th data-sort-key="${colIdx++}">Patents</th>
+          <th data-sort-key="${colIdx++}">Earliest</th>
+          <th data-sort-key="${colIdx++}">Latest</th>
+    `;
+  } else if (mode === 'post-grant') {
+    html += `
+          <th data-sort-key="${colIdx++}">Small 1st</th>
+          <th data-sort-key="${colIdx++}">Small 2nd</th>
+          <th data-sort-key="${colIdx++}">Small 3rd</th>
+          <th data-sort-key="${colIdx++}">Large 1st</th>
+          <th data-sort-key="${colIdx++}">Large 2nd</th>
+          <th data-sort-key="${colIdx++}">Large 3rd</th>
+          <th data-sort-key="${colIdx++}">Small Decl</th>
+          <th data-sort-key="${colIdx++}">Large Decl</th>
+          <th data-sort-key="${colIdx++}">Patents</th>
+          <th data-sort-key="${colIdx++}">Earliest</th>
+          <th data-sort-key="${colIdx++}">Latest</th>
     `;
   } else {
     html += `
-          <th data-sort-key="1">SMAL Count</th>
-          <th data-sort-key="2">Applications</th>
-          <th data-sort-key="3">Earliest</th>
-          <th data-sort-key="4">Latest</th>
+          <th data-sort-key="${colIdx++}">SMAL Count</th>
+          <th data-sort-key="${colIdx++}">Applications</th>
+          <th data-sort-key="${colIdx++}">Earliest</th>
+          <th data-sort-key="${colIdx++}">Latest</th>
     `;
   }
 
@@ -144,7 +167,20 @@ function renderEntityResults(data) {
     html += `<tr class="px-entity-row" data-entity="${escHtml(r.applicant_name)}">
       <td>${escHtml(r.applicant_name)}</td>`;
 
-    if (isPostGrant) {
+    if (mode === 'combined') {
+      html += `
+        <td>${r.smal_count.toLocaleString()}</td>
+        <td>${r.app_count.toLocaleString()}</td>
+        <td>${r.small_1st.toLocaleString()}</td>
+        <td>${r.small_2nd.toLocaleString()}</td>
+        <td>${r.small_3rd.toLocaleString()}</td>
+        <td>${r.large_1st.toLocaleString()}</td>
+        <td>${r.large_2nd.toLocaleString()}</td>
+        <td>${r.large_3rd.toLocaleString()}</td>
+        <td>${r.small_decl_total.toLocaleString()}</td>
+        <td>${r.large_decl_total.toLocaleString()}</td>
+        <td>${r.patent_count.toLocaleString()}</td>`;
+    } else if (mode === 'post-grant') {
       html += `
         <td>${r.small_1st.toLocaleString()}</td>
         <td>${r.small_2nd.toLocaleString()}</td>

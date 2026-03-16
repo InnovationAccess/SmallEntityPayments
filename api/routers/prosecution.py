@@ -267,6 +267,151 @@ def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
     }
 
 
+# ── Phase 1c: Combined prosecution + post-grant discovery ───────
+
+@router.post("/entities/combined")
+def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
+    """
+    Find entities with the highest total small entity activity across BOTH
+    prosecution (SMAL declarations in file wrapper) and post-grant
+    (maintenance fee payments + declarations).
+
+    Uses FULL OUTER JOIN so entities appearing in only one source are included.
+    """
+    if req.min_declarations < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_declarations must be >= 1",
+        )
+
+    sql = f"""
+        WITH -- Prosecution: SMAL declarations from file wrapper
+        smal_events AS (
+            SELECT
+                t.application_number,
+                t.event_date
+            FROM `{settings.pfw_transactions_table}` t
+            WHERE t.event_code = 'SMAL'
+              AND t.event_date >= '2016-01-01'
+        ),
+        prosecution AS (
+            SELECT
+                COALESCE(nu.representative_name, p.first_applicant_name,
+                         p.first_inventor_name, 'UNKNOWN') AS applicant_name,
+                COUNT(*) AS smal_count,
+                COUNT(DISTINCT s.application_number) AS app_count,
+                MIN(s.event_date) AS p_earliest,
+                MAX(s.event_date) AS p_latest
+            FROM smal_events s
+            LEFT JOIN `{settings.patent_table}` p
+                ON s.application_number = p.application_number
+            LEFT JOIN `{settings.unification_table}` nu
+                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
+                    = nu.associated_name
+            GROUP BY applicant_name
+        ),
+        -- Post-grant: maintenance fee events
+        maint_events AS (
+            SELECT m.patent_number, m.event_code, m.event_date
+            FROM `{settings.maintenance_table}` m
+            WHERE m.event_code LIKE 'M1%'
+               OR m.event_code LIKE 'M2%'
+               OR m.event_code LIKE 'F17%'
+               OR m.event_code LIKE 'F27%'
+               OR m.event_code IN ('SMAL', 'BIG.', 'LTOS', 'STOL')
+        ),
+        postgrant AS (
+            SELECT
+                COALESCE(nu.representative_name, p.first_applicant_name,
+                         p.first_inventor_name, 'UNKNOWN') AS applicant_name,
+                COUNT(CASE WHEN me.event_code = 'M2551' THEN 1 END) AS small_1st,
+                COUNT(CASE WHEN me.event_code = 'M2552' THEN 1 END) AS small_2nd,
+                COUNT(CASE WHEN me.event_code = 'M2553' THEN 1 END) AS small_3rd,
+                COUNT(CASE WHEN me.event_code = 'M1551' THEN 1 END) AS large_1st,
+                COUNT(CASE WHEN me.event_code = 'M1552' THEN 1 END) AS large_2nd,
+                COUNT(CASE WHEN me.event_code = 'M1553' THEN 1 END) AS large_3rd,
+                COUNT(CASE WHEN me.event_code IN ('SMAL', 'LTOS') THEN 1 END) AS small_decl_total,
+                COUNT(CASE WHEN me.event_code IN ('BIG.', 'STOL') THEN 1 END) AS large_decl_total,
+                COUNT(DISTINCT me.patent_number) AS patent_count,
+                MIN(me.event_date) AS pg_earliest,
+                MAX(me.event_date) AS pg_latest
+            FROM maint_events me
+            LEFT JOIN `{settings.patent_table}` p
+                ON me.patent_number = p.patent_number
+            LEFT JOIN `{settings.unification_table}` nu
+                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
+                    = nu.associated_name
+            GROUP BY applicant_name
+        )
+        SELECT
+            COALESCE(pr.applicant_name, pg.applicant_name) AS applicant_name,
+            COALESCE(pr.smal_count, 0) AS smal_count,
+            COALESCE(pr.app_count, 0) AS app_count,
+            COALESCE(pg.small_1st, 0) AS small_1st,
+            COALESCE(pg.small_2nd, 0) AS small_2nd,
+            COALESCE(pg.small_3rd, 0) AS small_3rd,
+            COALESCE(pg.large_1st, 0) AS large_1st,
+            COALESCE(pg.large_2nd, 0) AS large_2nd,
+            COALESCE(pg.large_3rd, 0) AS large_3rd,
+            COALESCE(pg.small_decl_total, 0) AS small_decl_total,
+            COALESCE(pg.large_decl_total, 0) AS large_decl_total,
+            COALESCE(pg.patent_count, 0) AS patent_count,
+            LEAST(pr.p_earliest, pg.pg_earliest) AS earliest_date,
+            GREATEST(pr.p_latest, pg.pg_latest) AS latest_date
+        FROM prosecution pr
+        FULL OUTER JOIN postgrant pg
+            ON pr.applicant_name = pg.applicant_name
+        WHERE (
+            COALESCE(pr.smal_count, 0)
+            + COALESCE(pg.small_1st, 0)
+            + COALESCE(pg.small_2nd, 0)
+            + COALESCE(pg.small_3rd, 0)
+            + COALESCE(pg.small_decl_total, 0)
+        ) >= @min_decl
+        ORDER BY (
+            COALESCE(pr.smal_count, 0)
+            + COALESCE(pg.small_1st, 0)
+            + COALESCE(pg.small_2nd, 0)
+            + COALESCE(pg.small_3rd, 0)
+            + COALESCE(pg.small_decl_total, 0)
+        ) DESC
+        LIMIT @lim
+    """
+
+    params = [
+        bigquery.ScalarQueryParameter("min_decl", "INT64", req.min_declarations),
+        bigquery.ScalarQueryParameter("lim", "INT64", req.limit),
+    ]
+
+    rows = bq_service.run_query(sql, params)
+
+    results = []
+    for r in rows:
+        results.append({
+            "applicant_name": r["applicant_name"],
+            "smal_count": r["smal_count"],
+            "app_count": r["app_count"],
+            "small_1st": r["small_1st"],
+            "small_2nd": r["small_2nd"],
+            "small_3rd": r["small_3rd"],
+            "large_1st": r["large_1st"],
+            "large_2nd": r["large_2nd"],
+            "large_3rd": r["large_3rd"],
+            "small_decl_total": r["small_decl_total"],
+            "large_decl_total": r["large_decl_total"],
+            "patent_count": r["patent_count"],
+            "earliest_date": str(r["earliest_date"]) if r["earliest_date"] else None,
+            "latest_date": str(r["latest_date"]) if r["latest_date"] else None,
+        })
+
+    return {
+        "total": len(results),
+        "min_declarations": req.min_declarations,
+        "mode": "combined",
+        "results": results,
+    }
+
+
 # ── Phase 2: Application drill-down ─────────────────────────────
 
 @router.post("/applications")
