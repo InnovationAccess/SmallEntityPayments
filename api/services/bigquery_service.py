@@ -46,21 +46,27 @@ class BigQueryService:
         Returns unique names with frequency counts and representative
         associations from name_unification.
         """
-        like_clauses: List[str] = []
+        and_clauses: List[str] = []
         params: List[bigquery.ScalarQueryParameter] = []
 
         for i, term in enumerate(and_terms):
             pname = f"and_{i}"
-            like_clauses.append(f"UPPER(en.entity_name) LIKE UPPER(@{pname})")
+            if "%" in term:
+                and_clauses.append(f"UPPER(en.entity_name) LIKE UPPER(@{pname})")
+            else:
+                and_clauses.append(f"UPPER(en.entity_name) = UPPER(@{pname})")
             params.append(bigquery.ScalarQueryParameter(pname, "STRING", term))
 
         not_clauses: List[str] = []
         for i, term in enumerate(not_terms):
             pname = f"not_{i}"
-            not_clauses.append(f"UPPER(en.entity_name) NOT LIKE UPPER(@{pname})")
+            if "%" in term:
+                not_clauses.append(f"UPPER(en.entity_name) NOT LIKE UPPER(@{pname})")
+            else:
+                not_clauses.append(f"UPPER(en.entity_name) != UPPER(@{pname})")
             params.append(bigquery.ScalarQueryParameter(pname, "STRING", term))
 
-        where_parts = like_clauses + not_clauses
+        where_parts = and_clauses + not_clauses
         where_sql = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
         sql = f"""

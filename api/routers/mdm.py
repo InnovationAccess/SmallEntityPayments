@@ -36,10 +36,15 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
       -  = NOT (prefix a term with -)
       *  = wildcard (translated to % for SQL LIKE)
 
+    Without *, a term is an exact (case-insensitive) match.
+    With *, the * positions become SQL % wildcards.
+
     Examples:
-      "GOOG*"           → and_terms=["%GOOG%"], not_terms=[]
-      "MICRO*+CORP"     → and_terms=["%MICRO%", "%CORP%"], not_terms=[]
-      "APPLE+-INC"      → and_terms=["%APPLE%"], not_terms=["%INC%"]
+      "etri"            → and_terms=["etri"], not_terms=[]       (exact match)
+      "GOOG*"           → and_terms=["GOOG%"], not_terms=[]      (starts with)
+      "*etri*"          → and_terms=["%etri%"], not_terms=[]      (contains)
+      "+MICRO*+CORP"    → and_terms=["MICRO%", "CORP"], not_terms=[]
+      "+APPLE+-INC"     → and_terms=["APPLE"], not_terms=["INC"]
     """
     and_terms: List[str] = []
     not_terms: List[str] = []
@@ -59,14 +64,8 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
         if not part:
             continue
 
-        # Replace * with % for SQL LIKE.
+        # Replace * with % for SQL LIKE — only where user placed wildcards.
         term = part.replace("*", "%")
-
-        # Always wrap with % for CONTAINS-style match.
-        if not term.startswith("%"):
-            term = f"%{term}"
-        if not term.endswith("%"):
-            term = f"{term}%"
 
         if is_not:
             not_terms.append(term)
