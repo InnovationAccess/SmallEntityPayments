@@ -119,7 +119,7 @@ async function loadReport(dateStr) {
 
 function renderTable(results) {
   if (!results.length) {
-    tableBody.innerHTML = '<tr><td colspan="9" class="text-muted">No companies scored 5 or higher on this date.</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="10" class="text-muted">No companies scored 5 or higher on this date.</td></tr>';
     return;
   }
 
@@ -140,16 +140,26 @@ function renderTable(results) {
       contactTitle = r.board_chair_title || 'Board Chair';
     }
 
-    // Board member count
-    let boardCount = 0;
+    // Parse board members for the new column
+    let boardMembers = [];
     try {
-      const board = JSON.parse(r.board_members_json || '[]');
-      boardCount = board.length;
+      boardMembers = JSON.parse(r.board_members_json || '[]');
     } catch (_) { /* ignore */ }
 
-    const boardInfo = boardCount > 0
-      ? `<br><span class="sec-board-count">${boardCount} board members</span>`
-      : '';
+    // Build board members cell with names and emails
+    let boardHtml = '';
+    if (boardMembers.length > 0) {
+      boardHtml = boardMembers.map(m => {
+        const name = escHtml(m.name || '');
+        const title = m.title ? `<span class="sec-board-title">${escHtml(m.title)}</span>` : '';
+        const email = m.email
+          ? `<a href="mailto:${escHtml(m.email)}" class="sec-board-email">${escHtml(m.email)}</a>`
+          : '';
+        return `<div class="sec-board-member">${name}${title ? ' — ' + title : ''}${email ? '<br>' + email : ''}</div>`;
+      }).join('');
+    } else {
+      boardHtml = '<span class="text-muted">—</span>';
+    }
 
     const ticker = escHtml(r.ticker || '');
     const hasMemo = r.memo_text ? '' : ' disabled';
@@ -162,7 +172,8 @@ function renderTable(results) {
       <td><a href="${escHtml(r.filing_url || '')}" target="_blank" rel="noopener">View 10-K on SEC</a></td>
       <td><span class="sec-score-badge" style="background:${color};">${r.score}</span></td>
       <td class="sec-gist-cell">${escHtml(r.gist || '')}</td>
-      <td><strong>${escHtml(contactName)}</strong><br>${escHtml(contactTitle)}${boardInfo}</td>
+      <td><strong>${escHtml(contactName)}</strong><br>${escHtml(contactTitle)}</td>
+      <td class="sec-board-cell">${boardHtml}</td>
       <td><button class="btn btn-primary btn-sm sec-memo-btn" data-ticker="${ticker}" data-date="${escHtml(r.analysis_date || '')}" data-company="${escHtml(r.company_name || '')}"${hasMemo}>Memo</button></td>
       <td><button class="btn-purple btn-sm sec-letter-btn" data-ticker="${ticker}" data-date="${escHtml(r.analysis_date || '')}" data-company="${escHtml(r.company_name || '')}"${hasLetter}>Letter</button></td>
     </tr>`;

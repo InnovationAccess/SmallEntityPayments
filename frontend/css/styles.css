@@ -1292,6 +1292,26 @@ textarea { resize: vertical; }
   font-size: .8rem;
 }
 
+.sec-board-cell {
+  font-size: .82rem;
+  max-width: 280px;
+}
+.sec-board-member {
+  padding: 2px 0;
+  border-bottom: 1px solid #eee;
+  line-height: 1.4;
+}
+.sec-board-member:last-child { border-bottom: none; }
+.sec-board-title {
+  color: var(--color-muted);
+  font-size: .78rem;
+}
+.sec-board-email {
+  color: var(--color-primary);
+  font-size: .78rem;
+  word-break: break-all;
+}
+
 .btn-purple {
   background: #7c3aed;
   color: #fff;

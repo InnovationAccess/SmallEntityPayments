@@ -35,7 +35,10 @@ def _get_model() -> GenerativeModel:
     global _model
     if _model is None:
         vertexai.init(project="uspto-data-app", location="us-central1")
-        _model = GenerativeModel(_MODEL_NAME)
+        _model = GenerativeModel(
+            _MODEL_NAME,
+            system_instruction=SYSTEM_PROMPT,
+        )
     return _model
 
 
