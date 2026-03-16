@@ -103,10 +103,19 @@ def discover_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             SELECT
                 s.application_number,
                 s.event_date,
-                COALESCE(p.first_applicant_name, p.first_inventor_name, 'UNKNOWN') AS applicant_name
+                -- Normalize name variants via name_unification table
+                COALESCE(
+                    nu.representative_name,
+                    p.first_applicant_name,
+                    p.first_inventor_name,
+                    'UNKNOWN'
+                ) AS applicant_name
             FROM smal_events s
             LEFT JOIN `{settings.patent_table}` p
                 ON s.application_number = p.application_number
+            LEFT JOIN `{settings.unification_table}` nu
+                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
+                    = nu.associated_name
         )
         SELECT
             applicant_name,
