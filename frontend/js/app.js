@@ -137,9 +137,9 @@ export function enableTableSorting(tableEl) {
         rows.sort((a, b) => {
           const cellA = a.cells[colIdx]?.textContent.trim() ?? '';
           const cellB = b.cells[colIdx]?.textContent.trim() ?? '';
-          // Try numeric comparison first
-          const numA = parseFloat(cellA);
-          const numB = parseFloat(cellB);
+          // Try numeric comparison first (strip commas from locale-formatted numbers)
+          const numA = parseFloat(cellA.replace(/,/g, ''));
+          const numB = parseFloat(cellB.replace(/,/g, ''));
           if (!isNaN(numA) && !isNaN(numB)) return sortDir * (numA - numB);
           return sortDir * cellA.localeCompare(cellB, undefined, { numeric: true });
         });

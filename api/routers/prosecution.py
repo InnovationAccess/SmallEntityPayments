@@ -103,19 +103,19 @@ def discover_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             SELECT
                 s.application_number,
                 s.event_date,
-                -- Normalize name variants via name_unification table
+                -- Normalize name variants via name_unification table (case-insensitive)
                 COALESCE(
                     nu.representative_name,
-                    p.first_applicant_name,
-                    p.first_inventor_name,
+                    UPPER(p.first_applicant_name),
+                    UPPER(p.first_inventor_name),
                     'UNKNOWN'
                 ) AS applicant_name
             FROM smal_events s
             LEFT JOIN `{settings.patent_table}` p
                 ON s.application_number = p.application_number
             LEFT JOIN `{settings.unification_table}` nu
-                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
-                    = nu.associated_name
+                ON UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name))
+                    = UPPER(nu.associated_name)
         )
         SELECT
             applicant_name,
@@ -198,16 +198,16 @@ def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
                 me.event_date,
                 COALESCE(
                     nu.representative_name,
-                    p.first_applicant_name,
-                    p.first_inventor_name,
+                    UPPER(p.first_applicant_name),
+                    UPPER(p.first_inventor_name),
                     'UNKNOWN'
                 ) AS applicant_name
             FROM maint_events me
             LEFT JOIN `{settings.patent_table}` p
                 ON me.patent_number = p.patent_number
             LEFT JOIN `{settings.unification_table}` nu
-                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
-                    = nu.associated_name
+                ON UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name))
+                    = UPPER(nu.associated_name)
         )
         SELECT
             applicant_name,
@@ -298,8 +298,8 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
         ),
         prosecution AS (
             SELECT
-                COALESCE(nu.representative_name, p.first_applicant_name,
-                         p.first_inventor_name, 'UNKNOWN') AS applicant_name,
+                COALESCE(nu.representative_name, UPPER(p.first_applicant_name),
+                         UPPER(p.first_inventor_name), 'UNKNOWN') AS applicant_name,
                 COUNT(*) AS smal_count,
                 COUNT(DISTINCT s.application_number) AS app_count,
                 MIN(s.event_date) AS p_earliest,
@@ -308,8 +308,8 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             LEFT JOIN `{settings.patent_table}` p
                 ON s.application_number = p.application_number
             LEFT JOIN `{settings.unification_table}` nu
-                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
-                    = nu.associated_name
+                ON UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name))
+                    = UPPER(nu.associated_name)
             GROUP BY applicant_name
         ),
         -- Post-grant: maintenance fee events
@@ -324,8 +324,8 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
         ),
         postgrant AS (
             SELECT
-                COALESCE(nu.representative_name, p.first_applicant_name,
-                         p.first_inventor_name, 'UNKNOWN') AS applicant_name,
+                COALESCE(nu.representative_name, UPPER(p.first_applicant_name),
+                         UPPER(p.first_inventor_name), 'UNKNOWN') AS applicant_name,
                 COUNT(CASE WHEN me.event_code = 'M2551' THEN 1 END) AS small_1st,
                 COUNT(CASE WHEN me.event_code = 'M2552' THEN 1 END) AS small_2nd,
                 COUNT(CASE WHEN me.event_code = 'M2553' THEN 1 END) AS small_3rd,
@@ -341,8 +341,8 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             LEFT JOIN `{settings.patent_table}` p
                 ON me.patent_number = p.patent_number
             LEFT JOIN `{settings.unification_table}` nu
-                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
-                    = nu.associated_name
+                ON UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name))
+                    = UPPER(nu.associated_name)
             GROUP BY applicant_name
         )
         SELECT
@@ -444,16 +444,16 @@ def discover_3rd_small_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
                 e.event_date,
                 COALESCE(
                     nu.representative_name,
-                    p.first_applicant_name,
-                    p.first_inventor_name,
+                    UPPER(p.first_applicant_name),
+                    UPPER(p.first_inventor_name),
                     'UNKNOWN'
                 ) AS applicant_name
             FROM m2553_events e
             LEFT JOIN `{settings.patent_table}` p
                 ON e.patent_number = p.patent_number
             LEFT JOIN `{settings.unification_table}` nu
-                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
-                    = nu.associated_name
+                ON UPPER(COALESCE(p.first_applicant_name, p.first_inventor_name))
+                    = UPPER(nu.associated_name)
         )
         SELECT
             applicant_name,
