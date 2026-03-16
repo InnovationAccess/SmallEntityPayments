@@ -595,12 +595,26 @@ def rebuild_entity_names():
 
 # ─── Main ─────────────────────────────────────────────────────────
 
+def update_sec_leads(work_dir: str) -> dict:
+    """Run SEC 10-K patent importance analysis pipeline."""
+    from patent_analyzer.run_pipeline import run_date_analysis, _previous_business_day
+    filing_date = _previous_business_day().strftime("%Y-%m-%d")
+    stats = run_date_analysis(filing_date)
+    return {
+        "processed": stats.get("analyzed", 0),
+        "skipped": 0,
+        "failed": stats.get("errors", 0),
+        "rows": stats.get("scored_5plus", 0),
+    }
+
+
 SOURCES = {
     "ptblxml": update_ptblxml,
     "pasdl": update_pasdl,
     "ptmnfee2": update_ptmnfee2,
     "ptfwpre": update_ptfwpre,
     "entity": lambda d: rebuild_entity_names() or {"processed": 1, "skipped": 0, "failed": 0, "rows": 0},
+    "sec-leads": update_sec_leads,
 }
 
 
@@ -613,6 +627,7 @@ def main():
         print(f"  ptmnfee2 - Maintenance fee events")
         print(f"  ptfwpre  - Patent file wrapper (3 tables)")
         print(f"  entity   - Rebuild entity_names table")
+        print(f"  sec-leads - SEC 10-K patent importance analysis")
         sys.exit(1)
 
     source = sys.argv[1]

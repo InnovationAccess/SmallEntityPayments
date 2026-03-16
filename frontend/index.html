@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=11" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=12" />
 </head>
 <body>
 
@@ -23,6 +23,7 @@
         <button class="tab-btn"        data-tab="entity-status"  role="tab" aria-selected="false">Entity&nbsp;Status</button>
         <button class="tab-btn"        data-tab="prosecution"   role="tab" aria-selected="false">Prosecution&nbsp;Fees</button>
         <button class="tab-btn"        data-tab="etl-log"       role="tab" aria-selected="false">Update&nbsp;Log</button>
+        <button class="tab-btn"        data-tab="sec-leads"     role="tab" aria-selected="false">SEC&nbsp;Leads</button>
       </nav>
     </div>
   </header>
@@ -615,6 +616,102 @@
       <div id="etl-status" class="status-msg hidden"></div>
     </section>
 
+    <!-- ===== Tab 8: SEC Leads ===== -->
+    <section id="tab-sec-leads" class="tab-panel" role="tabpanel">
+      <div class="panel-title-row">
+        <h2 class="panel-title">SEC 10-K Patent Importance Analysis</h2>
+        <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
+                onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
+      </div>
+      <div class="help-panel hidden">
+        <h4>How to Use SEC Leads</h4>
+        <ol>
+          <li><strong>Reports are generated daily</strong> (weekdays) by analyzing SEC 10-K annual filings.</li>
+          <li>Each company receives a <strong>patent importance score</strong> from 1-10 based on how critically it describes its own patent portfolio.</li>
+          <li>Only companies scoring <strong>5 or higher</strong> are shown.</li>
+          <li>Click <strong>Memo</strong> to view an internal patent importance assessment.</li>
+          <li>Click <strong>Letter</strong> to view a personalized Caremark fiduciary duty letter.</li>
+          <li>Use the <strong>date picker</strong> to view historical reports.</li>
+        </ol>
+        <p><strong>Scoring guide:</strong> 9-10 = patents central to identity; 7-8 = significant strategic drivers; 5-6 = meaningful competitive assets.</p>
+      </div>
+      <p class="panel-desc">
+        Automated assessment of how critically companies perceive their patent portfolios,
+        based on AI analysis of SEC 10-K annual filings. Companies scoring 5+ receive
+        personalized memos and Caremark fiduciary duty letters.
+      </p>
+
+      <!-- Date picker -->
+      <div class="card">
+        <div class="sec-controls-row">
+          <div class="form-group" style="flex:1;max-width:300px">
+            <label for="sec-date-picker">Report Date</label>
+            <select id="sec-date-picker"><option value="">Loading...</option></select>
+          </div>
+          <button id="sec-load-btn" class="btn btn-primary">Load Report</button>
+        </div>
+      </div>
+
+      <!-- Stats bar -->
+      <div id="sec-stats" class="sec-stats-grid hidden">
+        <div class="sec-stat-card">
+          <span class="sec-stat-value" id="sec-filings-count">0</span>
+          <span class="sec-stat-label">Filings Analyzed</span>
+        </div>
+        <div class="sec-stat-card">
+          <span class="sec-stat-value" id="sec-score5-count">0</span>
+          <span class="sec-stat-label">Companies Scoring 5+</span>
+        </div>
+        <div class="sec-stat-card">
+          <span class="sec-stat-value" id="sec-score7-count">0</span>
+          <span class="sec-stat-label">Companies Scoring 7+</span>
+        </div>
+        <div class="sec-stat-card">
+          <span class="sec-stat-value" id="sec-report-date">-</span>
+          <span class="sec-stat-label">Report Date</span>
+        </div>
+      </div>
+
+      <!-- Results table -->
+      <div id="sec-results" class="results-area hidden">
+        <div class="results-header">
+          <strong>Analysis Results</strong>
+          <span id="sec-results-count" class="results-count"></span>
+        </div>
+        <div class="table-scroll-wrap">
+          <table class="data-table" id="sec-table">
+            <thead>
+              <tr>
+                <th data-sort-key="0">Analyzed</th>
+                <th data-sort-key="1">Filed</th>
+                <th data-sort-key="2">Company</th>
+                <th>10-K Filing</th>
+                <th data-sort-key="4">Score</th>
+                <th data-sort-key="5">Gist</th>
+                <th data-sort-key="6">Secretary / Counsel</th>
+                <th>Memo</th>
+                <th>Letter</th>
+              </tr>
+            </thead>
+            <tbody id="sec-table-body">
+              <tr><td colspan="9" class="text-muted">Select a report date to load data.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Methodology note -->
+      <div class="sec-methodology">
+        <p><strong>Scoring Methodology:</strong> Each 10-K filing is scored 1&ndash;10 based on: patent term frequency and density,
+        strategic importance language, whether the company asserts its own patents (vs. being asserted against),
+        connection between patents and revenue/strategy, patent risk disclosures, quantitative portfolio references,
+        and presence of dedicated IP sections. Companies scoring 5+ are displayed. A penalty is applied when patent
+        litigation references are primarily about the company being a defendant rather than asserting its own patents.</p>
+      </div>
+
+      <div id="sec-status" class="status-msg hidden"></div>
+    </section>
+
   </main>
 
   <!-- ===== Address Modal ===== -->
@@ -660,6 +757,21 @@
     </div>
   </div>
 
+  <!-- ===== SEC Leads Document Modal ===== -->
+  <div id="sec-doc-modal" class="modal hidden">
+    <div class="modal-backdrop" data-close="sec-doc-modal"></div>
+    <div class="modal-content modal-content--wide">
+      <div class="sec-modal-header">
+        <h3 class="modal-title" id="sec-modal-title">Document</h3>
+        <div class="sec-modal-actions">
+          <button id="sec-modal-copy-btn" class="btn btn-secondary btn-sm">Copy to Clipboard</button>
+          <button id="sec-modal-close-btn" class="btn btn-secondary btn-sm">Close</button>
+        </div>
+      </div>
+      <pre id="sec-modal-body" class="sec-modal-body"></pre>
+    </div>
+  </div>
+
   <footer class="site-footer">
     <p>USPTO Data Platform &copy; 2024</p>
   </footer>
@@ -672,5 +784,6 @@
   <script src="/static/js/entity_status.js?v=5" type="module"></script>
   <script src="/static/js/prosecution.js?v=4" type="module"></script>
   <script src="/static/js/etl_log.js?v=3"    type="module"></script>
+  <script src="/static/js/sec_leads.js?v=1"  type="module"></script>
 </body>
 </html>

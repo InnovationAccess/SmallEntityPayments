@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from api.routers import ai_assistant, assignments, citations, entity_status, etl_log, mdm, prosecution, query
+from api.routers import ai_assistant, assignments, citations, entity_status, etl_log, mdm, prosecution, query, sec_leads
 
 app = FastAPI(
     title="USPTO Data Platform",
@@ -24,6 +24,7 @@ app.include_router(assignments.router)
 app.include_router(entity_status.router)
 app.include_router(prosecution.router)
 app.include_router(etl_log.router)
+app.include_router(sec_leads.router)
 
 # Serve the frontend single-page application
 app.mount("/static", StaticFiles(directory="frontend"), name="static")

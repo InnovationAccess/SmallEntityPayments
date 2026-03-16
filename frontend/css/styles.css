@@ -1222,3 +1222,142 @@ textarea { resize: vertical; }
   border-radius: 3px;
   transition: width .3s;
 }
+
+/* =====================================================================
+   SEC Leads Tab
+   ===================================================================== */
+
+.sec-controls-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.sec-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.sec-stat-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+
+.sec-stat-value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.sec-stat-label {
+  display: block;
+  font-size: .8rem;
+  color: var(--color-muted);
+  margin-top: .25rem;
+}
+
+.sec-score-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: .9rem;
+  color: #fff;
+}
+
+.sec-gist-cell {
+  max-width: 400px;
+  line-height: 1.5;
+  font-size: .85rem;
+}
+
+.sec-ticker {
+  color: var(--color-muted);
+  font-size: .85rem;
+  font-weight: 600;
+}
+
+.sec-board-count {
+  color: var(--color-muted);
+  font-size: .8rem;
+}
+
+.btn-purple {
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  padding: .35rem .75rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 500;
+}
+.btn-purple:hover { background: #6d28d9; }
+.btn-purple:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.btn-sm {
+  padding: .3rem .65rem;
+  font-size: .82rem;
+}
+
+.sec-methodology {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: #f8f9fa;
+  border-radius: var(--radius);
+  border-left: 4px solid var(--color-primary);
+}
+.sec-methodology p {
+  font-size: .85rem;
+  color: var(--color-muted);
+  line-height: 1.6;
+}
+.sec-methodology p strong {
+  color: var(--color-text);
+}
+
+.sec-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.sec-modal-actions {
+  display: flex;
+  gap: .5rem;
+}
+
+.sec-modal-body {
+  white-space: pre-wrap;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: .9rem;
+  line-height: 1.6;
+  max-height: 65vh;
+  overflow-y: auto;
+  background: #fafafa;
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+@media (max-width: 900px) {
+  .sec-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+  .sec-stats-grid { grid-template-columns: 1fr; }
+}

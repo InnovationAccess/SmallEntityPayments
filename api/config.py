@@ -104,5 +104,9 @@ class Settings:
     def pfw_embedded_assignments_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.pfw_embedded_assignments"
 
+    @property
+    def sec_leads_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.sec_leads_results"
+
 
 settings = Settings()
