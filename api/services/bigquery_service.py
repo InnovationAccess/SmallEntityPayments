@@ -65,14 +65,15 @@ class BigQueryService:
 
         sql = f"""
         SELECT
-          en.entity_name AS raw_name,
-          en.frequency,
-          nu.representative_name
+          COALESCE(nu.representative_name, en.entity_name) AS raw_name,
+          SUM(en.frequency) AS frequency,
+          MAX(nu.representative_name) AS representative_name
         FROM `{settings.entity_names_table}` en
         LEFT JOIN `{settings.unification_table}` nu
-          ON nu.associated_name = en.entity_name
+          ON UPPER(nu.associated_name) = UPPER(en.entity_name)
         {where_sql}
-        ORDER BY en.frequency DESC
+        GROUP BY COALESCE(nu.representative_name, en.entity_name)
+        ORDER BY frequency DESC
         LIMIT 1000
         """
         return self.run_query(sql, params)
