@@ -359,7 +359,8 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "total_patents": 0,
             "total_applications": 0,
             "sold_count": 0,
-            "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0},
+            "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0,
+                           "small_10y": 0, "large_10y": 0, "micro_10y": 0, "total_10y": 0},
             "post_grant": {
                 "small": 0, "large": 0, "micro": 0, "total": 0,
                 "stol": 0, "ltos": 0, "stom": 0,
@@ -442,7 +443,13 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         AS latest_pros_status,
       COUNTIF(t.event_code = 'SMAL')  AS pros_smal,
       COUNTIF(t.event_code = 'BIG.')  AS pros_big,
-      COUNTIF(t.event_code = 'MICR')  AS pros_micr
+      COUNTIF(t.event_code = 'MICR')  AS pros_micr,
+      -- 10-year filtered: latest status from events in the past 10 years
+      ARRAY_AGG(
+        CASE WHEN t.event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 YEAR)
+             THEN t.event_code END
+        IGNORE NULLS ORDER BY t.event_date DESC LIMIT 1
+      )[SAFE_OFFSET(0)] AS latest_pros_status_10y
     FROM `{settings.pfw_transactions_table}` t
     WHERE t.application_number IN UNNEST(@an_list)
       AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
@@ -479,6 +486,11 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     pros_large = 0
     pros_micro = 0
     pros_total = 0
+    # Prosecution — past 10 years only
+    pros_small_10y = 0
+    pros_large_10y = 0
+    pros_micro_10y = 0
+    pros_total_10y = 0
     # Dashboard accumulators — post-grant
     pg_small = 0
     pg_large = 0
@@ -510,6 +522,18 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 pros_large += 1
             elif pros_status == "MICRO":
                 pros_micro += 1
+
+        # Prosecution — past 10 years
+        pros_status_10y_raw = pros.get("latest_pros_status_10y")
+        pros_status_10y = PROS_CODE_MAP.get(pros_status_10y_raw)
+        if pros_status_10y:
+            pros_total_10y += 1
+            if pros_status_10y == "SMALL":
+                pros_small_10y += 1
+            elif pros_status_10y == "LARGE":
+                pros_large_10y += 1
+            elif pros_status_10y == "MICRO":
+                pros_micro_10y += 1
 
         # Post-grant data
         pg = pg_by_patent.get(pat_num, {}) if pat_num else {}
@@ -570,6 +594,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "large": pros_large,
             "micro": pros_micro,
             "total": pros_total,
+            "small_10y": pros_small_10y,
+            "large_10y": pros_large_10y,
+            "micro_10y": pros_micro_10y,
+            "total_10y": pros_total_10y,
         },
         "post_grant": {
             "small": pg_small,

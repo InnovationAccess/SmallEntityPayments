@@ -366,19 +366,38 @@ function renderApplicantPortfolio(data) {
       <div class="cite-summary-grid">
         <div class="cite-stat">
           <span class="cite-stat-value">${pros.small.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('SMALL')} Small</span>
+          <span class="cite-stat-label">${statusBadge('SMALL')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pros.micro.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('MICRO')} Micro</span>
+          <span class="cite-stat-label">${statusBadge('MICRO')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pros.large.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('LARGE')} Large</span>
+          <span class="cite-stat-label">${statusBadge('LARGE')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pros.total.toLocaleString()}</span>
-          <span class="cite-stat-label">Total Declarations</span>
+          <span class="cite-stat-label">Total</span>
+        </div>
+      </div>
+      <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
+      <div class="cite-summary-grid">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${(pros.small_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('SMALL')}</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${(pros.micro_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('MICRO')}</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${(pros.large_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-label">${statusBadge('LARGE')}</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${(pros.total_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-label">Total</span>
         </div>
       </div>
     </div>
@@ -390,15 +409,15 @@ function renderApplicantPortfolio(data) {
       <div class="cite-summary-grid">
         <div class="cite-stat">
           <span class="cite-stat-value">${pg.small.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('SMALL')} First Small</span>
+          <span class="cite-stat-label">First ${statusBadge('SMALL')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pg.micro.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('MICRO')} First Micro</span>
+          <span class="cite-stat-label">First ${statusBadge('MICRO')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pg.large.toLocaleString()}</span>
-          <span class="cite-stat-label">${statusBadge('LARGE')} First Large</span>
+          <span class="cite-stat-label">First ${statusBadge('LARGE')}</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${pg.converted.toLocaleString()}</span>
