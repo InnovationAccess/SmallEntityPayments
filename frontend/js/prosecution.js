@@ -1,7 +1,7 @@
 /**
- * prosecution.js – Prosecution Fee Investigation tab.
+ * prosecution.js – Locate Payors tab (formerly Prosecution Fee Investigation).
  *
- * Phase 1: Entity discovery — find entities with N+ SMAL declarations
+ * Phase 1: Entity discovery — find entities via prosecution OR post-grant activities
  * Phase 2: Application drill-down — list apps for selected entity
  * Phase 3: Invoice retrieval + fee code extraction via AI vision
  */
@@ -15,7 +15,8 @@ import {
 
 const minDeclInput    = document.getElementById('px-min-decl');
 const entityLimitInput = document.getElementById('px-entity-limit');
-const discoverBtn     = document.getElementById('px-discover-btn');
+const prosecutionBtn  = document.getElementById('px-prosecution-btn');
+const postGrantBtn    = document.getElementById('px-postgrant-btn');
 const entityResultsEl = document.getElementById('px-entity-results');
 
 const phase2Card      = document.getElementById('px-phase2');
@@ -39,6 +40,7 @@ const extractResultsEl = document.getElementById('px-extract-results');
 const statusMsg       = document.getElementById('px-status');
 
 let selectedEntity = null;
+let currentMode = 'prosecution'; // 'prosecution' or 'post-grant'
 
 // Module-level sets so Phase 3 can access Phase 2 selections
 let selectedAppRows = new Set();
@@ -47,15 +49,20 @@ let docResultsList = [];  // full list from Phase 3a
 
 // ── Phase 1: Entity Discovery ───────────────────────────────────
 
-discoverBtn.addEventListener('click', () => discoverEntities());
+prosecutionBtn.addEventListener('click', () => discoverEntities('prosecution'));
+postGrantBtn.addEventListener('click', () => discoverEntities('post-grant'));
 
-async function discoverEntities() {
+async function discoverEntities(mode) {
+  currentMode = mode;
   const minDecl = parseInt(minDeclInput.value) || 1000;
   const limit = parseInt(entityLimitInput.value) || 200;
 
-  setLoading(discoverBtn, true);
+  const activeBtn = mode === 'prosecution' ? prosecutionBtn : postGrantBtn;
+  setLoading(activeBtn, true);
   entityResultsEl.classList.remove('hidden');
-  entityResultsEl.innerHTML = '<p class="text-muted">Searching for entities with SMAL declarations...</p>';
+  entityResultsEl.innerHTML = mode === 'prosecution'
+    ? '<p class="text-muted">Searching for entities with SMAL declarations...</p>'
+    : '<p class="text-muted">Searching for entities with small entity maintenance fee payments...</p>';
 
   // Hide phases 2+3 when running a new discovery
   phase2Card.classList.add('hidden');
@@ -63,30 +70,42 @@ async function discoverEntities() {
   hidePhase3();
   selectedEntity = null;
 
+  const endpoint = mode === 'prosecution'
+    ? '/api/prosecution/entities'
+    : '/api/prosecution/entities/post-grant';
+
   try {
-    const data = await apiPost('/api/prosecution/entities', {
+    const data = await apiPost(endpoint, {
       min_declarations: minDecl,
       limit: limit,
     });
+    data._mode = mode;
     renderEntityResults(data);
   } catch (err) {
     showStatus(statusMsg, err.message, 'error');
     entityResultsEl.innerHTML = '';
     entityResultsEl.classList.add('hidden');
   } finally {
-    setLoading(discoverBtn, false);
+    setLoading(activeBtn, false);
   }
 }
 
 function renderEntityResults(data) {
   if (!data.results || data.results.length === 0) {
-    entityResultsEl.innerHTML = '<p class="text-muted">No entities found with that many SMAL declarations.</p>';
+    entityResultsEl.innerHTML = '<p class="text-muted">No entities found matching the criteria.</p>';
     return;
   }
 
+  const mode = data._mode || data.mode || 'prosecution';
+  const isPostGrant = mode === 'post-grant';
+
+  const headerLabel = isPostGrant
+    ? `Entities with ≥${data.min_declarations.toLocaleString()} Small Entity Maintenance Events`
+    : `Entities with ≥${data.min_declarations.toLocaleString()} SMAL Declarations`;
+
   let html = `
     <div class="results-header">
-      <strong>Entities with ≥${data.min_declarations.toLocaleString()} SMAL Declarations</strong>
+      <strong>${headerLabel}</strong>
       <span class="results-count">${data.total} entities found</span>
     </div>
     <p class="px-hint">Click an entity row to select it for Phase 2 drill-down.</p>
@@ -94,19 +113,43 @@ function renderEntityResults(data) {
       <table class="data-table" id="px-entity-table">
         <thead><tr>
           <th data-sort-key="0">Applicant Name</th>
+  `;
+
+  if (isPostGrant) {
+    html += `
+          <th data-sort-key="1">Small Declarations</th>
+          <th data-sort-key="2">Small Payments</th>
+          <th data-sort-key="3">Patents</th>
+          <th data-sort-key="4">Earliest</th>
+          <th data-sort-key="5">Latest</th>
+    `;
+  } else {
+    html += `
           <th data-sort-key="1">SMAL Count</th>
           <th data-sort-key="2">Applications</th>
           <th data-sort-key="3">Earliest</th>
           <th data-sort-key="4">Latest</th>
-        </tr></thead>
-        <tbody>
-  `;
+    `;
+  }
+
+  html += '</tr></thead><tbody>';
 
   for (const r of data.results) {
     html += `<tr class="px-entity-row" data-entity="${escHtml(r.applicant_name)}">
-      <td>${escHtml(r.applicant_name)}</td>
-      <td>${r.smal_count.toLocaleString()}</td>
-      <td>${r.app_count.toLocaleString()}</td>
+      <td>${escHtml(r.applicant_name)}</td>`;
+
+    if (isPostGrant) {
+      html += `
+        <td>${r.small_decl_count.toLocaleString()}</td>
+        <td>${r.small_payment_count.toLocaleString()}</td>
+        <td>${r.patent_count.toLocaleString()}</td>`;
+    } else {
+      html += `
+        <td>${r.smal_count.toLocaleString()}</td>
+        <td>${r.app_count.toLocaleString()}</td>`;
+    }
+
+    html += `
       <td>${escHtml(r.earliest_date || '')}</td>
       <td>${escHtml(r.latest_date || '')}</td>
     </tr>`;

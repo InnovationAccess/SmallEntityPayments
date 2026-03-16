@@ -155,6 +155,91 @@ def discover_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
     }
 
 
+# ── Phase 1b: Post-grant entity discovery (maintenance fees) ────
+
+@router.post("/entities/post-grant")
+def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
+    """
+    Find entities that have paid maintenance fees at small entity rates.
+    Searches maintenance_fee_events_v2 for M2xxx/F27xx event codes.
+
+    Returns two count columns:
+      - small_decl_count: total count of all small-entity-related events
+      - small_payment_count: count of core maintenance fee payments (M2551/M2552/M2553)
+    """
+    if req.min_declarations < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="min_declarations must be >= 1",
+        )
+
+    sql = f"""
+        WITH small_maint AS (
+            SELECT
+                m.patent_number,
+                m.event_code,
+                m.event_date
+            FROM `{settings.maintenance_table}` m
+            WHERE (m.event_code LIKE 'M2%' OR m.event_code LIKE 'F27%')
+        ),
+        with_applicant AS (
+            SELECT
+                sm.patent_number,
+                sm.event_code,
+                sm.event_date,
+                COALESCE(
+                    nu.representative_name,
+                    p.first_applicant_name,
+                    p.first_inventor_name,
+                    'UNKNOWN'
+                ) AS applicant_name
+            FROM small_maint sm
+            LEFT JOIN `{settings.patent_table}` p
+                ON sm.patent_number = p.patent_number
+            LEFT JOIN `{settings.unification_table}` nu
+                ON COALESCE(p.first_applicant_name, p.first_inventor_name)
+                    = nu.associated_name
+        )
+        SELECT
+            applicant_name,
+            COUNT(*) AS small_decl_count,
+            COUNT(CASE WHEN event_code IN ('M2551', 'M2552', 'M2553') THEN 1 END) AS small_payment_count,
+            COUNT(DISTINCT patent_number) AS patent_count,
+            MIN(event_date) AS earliest_date,
+            MAX(event_date) AS latest_date
+        FROM with_applicant
+        GROUP BY applicant_name
+        HAVING COUNT(*) >= @min_decl
+        ORDER BY small_decl_count DESC
+        LIMIT @lim
+    """
+
+    params = [
+        bigquery.ScalarQueryParameter("min_decl", "INT64", req.min_declarations),
+        bigquery.ScalarQueryParameter("lim", "INT64", req.limit),
+    ]
+
+    rows = bq_service.run_query(sql, params)
+
+    results = []
+    for r in rows:
+        results.append({
+            "applicant_name": r["applicant_name"],
+            "small_decl_count": r["small_decl_count"],
+            "small_payment_count": r["small_payment_count"],
+            "patent_count": r["patent_count"],
+            "earliest_date": str(r["earliest_date"]) if r["earliest_date"] else None,
+            "latest_date": str(r["latest_date"]) if r["latest_date"] else None,
+        })
+
+    return {
+        "total": len(results),
+        "min_declarations": req.min_declarations,
+        "mode": "post-grant",
+        "results": results,
+    }
+
+
 # ── Phase 2: Application drill-down ─────────────────────────────
 
 @router.post("/applications")

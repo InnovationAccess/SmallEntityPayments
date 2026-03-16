@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>USPTO Data Platform</title>
-  <link rel="stylesheet" href="/static/css/styles.css?v=13" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=14" />
 </head>
 <body>
 
@@ -21,7 +21,7 @@
         <button class="tab-btn"        data-tab="ai-assistant"  role="tab" aria-selected="false">AI&nbsp;Assistant</button>
         <button class="tab-btn"        data-tab="citations"     role="tab" aria-selected="false">Forward&nbsp;Citations</button>
         <button class="tab-btn"        data-tab="entity-status"  role="tab" aria-selected="false">Entity&nbsp;Status</button>
-        <button class="tab-btn"        data-tab="prosecution"   role="tab" aria-selected="false">Prosecution&nbsp;Fees</button>
+        <button class="tab-btn"        data-tab="prosecution"   role="tab" aria-selected="false">Locate&nbsp;Payors</button>
         <button class="tab-btn"        data-tab="etl-log"       role="tab" aria-selected="false">Update&nbsp;Log</button>
         <button class="tab-btn"        data-tab="sec-leads"     role="tab" aria-selected="false">SEC&nbsp;Leads</button>
       </nav>
@@ -415,18 +415,24 @@
       <div id="es-status" class="status-msg hidden"></div>
     </section>
 
-    <!-- ===== Tab 6: Prosecution Fee Investigation ===== -->
+    <!-- ===== Tab 6: Locate Payors ===== -->
     <section id="tab-prosecution" class="tab-panel" role="tabpanel">
       <div class="panel-title-row">
-        <h2 class="panel-title">Prosecution Fee Investigation</h2>
+        <h2 class="panel-title">Locate Payors</h2>
         <button class="help-toggle-btn" aria-label="Show help" title="How to use this tab"
                 onclick="this.classList.toggle('active'); this.closest('.panel-title-row').nextElementSibling.classList.toggle('hidden')">?</button>
       </div>
       <div class="help-panel hidden">
-        <h4>How to Use Prosecution Fee Investigation</h4>
-        <p>This is a 3-phase workflow for investigating prosecution payment patterns:</p>
+        <h4>How to Use Locate Payors</h4>
+        <p>This is a 3-phase workflow for investigating entities that declared small entity status:</p>
         <ol>
-          <li><strong>Phase 1 — Entity Discovery:</strong> Set a minimum number of small entity (SMAL) declarations to find entities with significant prosecution activity. Default is 1,000. Click "Discover Entities" to search. Click any entity row to select it.</li>
+          <li><strong>Phase 1 — Entity Discovery:</strong> Set a minimum number of small entity events. Choose a search mode:
+            <ul>
+              <li><strong>Prosecution Activities</strong> — searches SMAL declarations in prosecution file wrapper events (2016+)</li>
+              <li><strong>Post Grant Activities</strong> — searches maintenance fee payments at small entity rates (M2xxx/F27xx codes)</li>
+            </ul>
+            Click any entity row to select it for Phase 2.
+          </li>
           <li><strong>Phase 2 — Application Drill-down:</strong> After selecting an entity, adjust the date range if needed and click "Load Applications". The table shows all applications with SMAL declarations.
             <ul>
               <li><strong>Ctrl+Click</strong> to select/deselect individual rows</li>
@@ -455,8 +461,9 @@
       <div class="card">
         <h3 class="card-title">Phase 1 — Entity Discovery</h3>
         <p class="card-desc">
-          Find entities with a minimum number of small entity (SMAL) declarations
-          in prosecution events from 2016 onwards.
+          Find entities with a minimum number of small entity declarations.
+          Search prosecution activities (SMAL declarations in file wrapper) or
+          post-grant activities (maintenance fee payments at small entity rates).
         </p>
         <div class="form-grid">
           <div class="form-group">
@@ -468,7 +475,10 @@
             <input id="px-entity-limit" type="number" value="200" min="1" max="1000" />
           </div>
         </div>
-        <button id="px-discover-btn" class="btn btn-primary">Discover Entities</button>
+        <div class="px-discover-btns">
+          <button id="px-prosecution-btn" class="btn btn-discover">Prosecution Activities</button>
+          <button id="px-postgrant-btn" class="btn btn-discover">Post Grant Activities</button>
+        </div>
       </div>
 
       <!-- Phase 1 results: entity list -->
@@ -782,7 +792,7 @@
   <script src="/static/js/ai_assistant.js?v=8"  type="module"></script>
   <script src="/static/js/citations.js?v=5"    type="module"></script>
   <script src="/static/js/entity_status.js?v=6" type="module"></script>
-  <script src="/static/js/prosecution.js?v=4" type="module"></script>
+  <script src="/static/js/prosecution.js?v=5" type="module"></script>
   <script src="/static/js/etl_log.js?v=3"    type="module"></script>
   <script src="/static/js/sec_leads.js?v=3"  type="module"></script>
 </body>
