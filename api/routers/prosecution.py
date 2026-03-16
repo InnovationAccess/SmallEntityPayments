@@ -125,7 +125,8 @@ def discover_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             MAX(event_date) AS latest_date
         FROM with_applicant
         GROUP BY applicant_name
-        HAVING COUNT(*) >= @min_decl
+        HAVING applicant_name != 'UNKNOWN'
+           AND COUNT(*) >= @min_decl
         ORDER BY smal_count DESC
         LIMIT @lim
     """
@@ -227,7 +228,8 @@ def discover_post_grant_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             MAX(event_date) AS latest_date
         FROM with_applicant
         GROUP BY applicant_name
-        HAVING (
+        HAVING applicant_name != 'UNKNOWN'
+           AND (
             COUNT(CASE WHEN event_code LIKE 'M2%' OR event_code LIKE 'F27%'
                          OR event_code IN ('SMAL', 'LTOS') THEN 1 END)
         ) >= @min_decl
@@ -361,7 +363,8 @@ def discover_combined_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
         FROM prosecution pr
         FULL OUTER JOIN postgrant pg
             ON pr.applicant_name = pg.applicant_name
-        WHERE (
+        WHERE COALESCE(pr.applicant_name, pg.applicant_name) != 'UNKNOWN'
+          AND (
             COALESCE(pr.smal_count, 0)
             + COALESCE(pg.small_1st, 0)
             + COALESCE(pg.small_2nd, 0)
@@ -460,7 +463,8 @@ def discover_3rd_small_entities(req: EntityDiscoveryRequest) -> Dict[str, Any]:
             MAX(event_date) AS latest_date
         FROM with_applicant
         GROUP BY applicant_name
-        HAVING COUNT(*) >= @min_decl
+        HAVING applicant_name != 'UNKNOWN'
+           AND COUNT(*) >= @min_decl
         ORDER BY m2553_count DESC
         LIMIT @lim
     """

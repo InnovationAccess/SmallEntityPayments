@@ -65,6 +65,12 @@ const MODE_CONFIG = {
 
 async function discoverEntities(mode) {
   currentMode = mode;
+
+  // M2553 is paid once per patent — auto-lower threshold for this mode
+  if (mode === '3rd-small' && (parseInt(minDeclInput.value) || 1000) >= 1000) {
+    minDeclInput.value = 10;
+  }
+
   const minDecl = parseInt(minDeclInput.value) || 1000;
   const limit = parseInt(entityLimitInput.value) || 200;
 
