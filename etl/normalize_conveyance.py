@@ -403,10 +403,10 @@ WHERE r.normalized_type IS NULL
 
 
 def step_3_classify_partial(dry_run: bool = False):
-    """Classify assignments with minority matches -> divestiture + review."""
+    """Classify assignments with minority matches -> review."""
     run_bq(f"""
 UPDATE `{DATASET}.pat_assign_records` r
-SET r.normalized_type = 'divestiture',
+SET r.normalized_type = 'review',
     r.employer_assignment = FALSE,
     r.review_flag = TRUE
 WHERE r.normalized_type IS NULL
@@ -416,7 +416,7 @@ WHERE r.normalized_type IS NULL
       AND total_person_assignors > 1
       AND matching_assignors * 2 < total_person_assignors
   )
-""", label="Step 3d: Minority match -> divestiture + review_flag", dry_run=dry_run)
+""", label="Step 3d: Minority match -> review", dry_run=dry_run)
 
 
 def step_3_drop_staging(dry_run: bool = False):
@@ -446,14 +446,14 @@ WHERE normalized_type IS NULL
 
 
 def step_4_remaining_nulls(dry_run: bool = False):
-    """Everything still NULL -> divestiture + review_flag."""
+    """Everything still NULL -> review."""
     run_bq(f"""
 UPDATE `{DATASET}.pat_assign_records`
-SET normalized_type = 'divestiture',
+SET normalized_type = 'review',
     employer_assignment = FALSE,
     review_flag = TRUE
 WHERE normalized_type IS NULL
-""", label="Step 4b: Remaining NULL -> divestiture + review_flag", dry_run=dry_run)
+""", label="Step 4b: Remaining NULL -> review", dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ Normalized (fine-grained) categories:
     merger             — Acquirer takes target's assets (actual ownership change)
     government         — Government interest / confirmatory license (Bayh-Dole)
     court_order        — Court-ordered transfer (typically bankruptcy proceedings)
+    review             — Uncertain classification, flagged for human review
     assignment_pending — Text-level assignment; needs BQ inventor join to resolve
                          employee vs divestiture
 """
@@ -178,7 +179,7 @@ def classify_conveyance_normalized(text: str | None) -> tuple[str, bool]:
         Tuple of (normalized_type, review_flag).
     """
     if not text:
-        return ("divestiture", True)
+        return ("review", True)
 
     # Check specific patterns first
     for category, review, pattern in _NORMALIZED_PATTERNS:
@@ -189,5 +190,5 @@ def classify_conveyance_normalized(text: str | None) -> tuple[str, bool]:
     if _ASSIGNMENT_PATTERN.search(text):
         return ("assignment_pending", False)
 
-    # Unknown text -> flag for review
-    return ("divestiture", True)
+    # Unknown text -> flag for human review
+    return ("review", True)

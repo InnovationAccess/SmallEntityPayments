@@ -683,10 +683,10 @@ WHERE r.normalized_type = 'assignment_pending'
   )
 """, timeout=600)
 
-    # Remaining assignment_pending -> divestiture + review
+    # Remaining assignment_pending -> review
     bq_query(f"""
 UPDATE `{BQ_DATASET}.pat_assign_records`
-SET normalized_type = 'divestiture', employer_assignment = FALSE, review_flag = TRUE
+SET normalized_type = 'review', employer_assignment = FALSE, review_flag = TRUE
 WHERE normalized_type = 'assignment_pending'
 """, timeout=600)
 
