@@ -328,6 +328,7 @@ async function loadApplicantPortfolio() {
 function renderApplicantPortfolio(data) {
   const pros = data.prosecution || {};
   const pg = data.post_grant || {};
+  const pay = pg.payments || {m1551:0,m1552:0,m1553:0,m2551:0,m2552:0,m2553:0,m3551:0,m3552:0,m3553:0};
   const pgConvRate = pg.total > 0
     ? (pg.converted / pg.total * 100).toFixed(1) : 0;
 
@@ -406,43 +407,63 @@ function renderApplicantPortfolio(data) {
     <div class="card" style="margin-top:1rem">
       <h4 class="card-title" style="font-size:1rem">Post-Grant Phase — Maintenance Fees</h4>
       <p class="text-muted" style="margin:0 0 0.5rem">From maintenance fee payments, declarations, and transitions</p>
-      <div class="cite-summary-grid">
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.small.toLocaleString()}</span>
-          <span class="cite-stat-label">First ${statusBadge('SMALL')}</span>
+      <div style="display:flex;gap:2rem;flex-wrap:wrap">
+        <!-- Payments -->
+        <div style="flex:1;min-width:300px">
+          <div style="color:#c0392b;font-weight:600;margin-bottom:0.5rem">Payments:</div>
+          <table class="data-table" style="font-size:0.85rem">
+            <thead><tr>
+              <th></th>
+              <th style="text-align:center">${statusBadge('MICRO')}</th>
+              <th style="text-align:center">${statusBadge('SMALL')}</th>
+              <th style="text-align:center">${statusBadge('LARGE')}</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td style="font-weight:600">3.5-yr</td>
+                <td style="text-align:right">${pay.m3551.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m2551.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m1551.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600">7.5-yr</td>
+                <td style="text-align:right">${pay.m3552.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m2552.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m1552.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td style="font-weight:600">11.5-yr</td>
+                <td style="text-align:right">${pay.m3553.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m2553.toLocaleString()}</td>
+                <td style="text-align:right">${pay.m1553.toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.micro.toLocaleString()}</span>
-          <span class="cite-stat-label">First ${statusBadge('MICRO')}</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.large.toLocaleString()}</span>
-          <span class="cite-stat-label">First ${statusBadge('LARGE')}</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.converted.toLocaleString()}</span>
-          <span class="cite-stat-label">Status Changed</span>
+        <!-- Declarations -->
+        <div style="flex:1;min-width:250px">
+          <div style="color:#c0392b;font-weight:600;margin-bottom:0.5rem">Declarations:</div>
+          <div style="display:flex;gap:2rem;flex-wrap:wrap">
+            <div>
+              <div style="font-weight:600;margin-bottom:0.25rem">Transitions</div>
+              <div style="font-size:0.85rem;line-height:1.8">
+                Micro &gt; Small: ${(pg.mtos || 0).toLocaleString()}<br>
+                Small &gt; Micro: ${pg.stom.toLocaleString()}<br>
+                Small &gt; Large: ${pg.stol.toLocaleString()}<br>
+                Large &gt; Small: ${pg.ltos.toLocaleString()}
+              </div>
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:0.25rem">Status</div>
+              <div style="font-size:0.85rem;line-height:1.8">
+                ${statusBadge('MICRO')}: ${(pg.decl_micr || 0).toLocaleString()}<br>
+                ${statusBadge('SMALL')}: ${(pg.decl_smal || 0).toLocaleString()}<br>
+                ${statusBadge('LARGE')}: ${(pg.decl_big || 0).toLocaleString()}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      ${(pg.stol || pg.ltos || pg.stom) ? `
-      <div class="cite-summary-grid" style="margin-top:0.5rem">
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.stol.toLocaleString()}</span>
-          <span class="cite-stat-label">Small→Large</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.ltos.toLocaleString()}</span>
-          <span class="cite-stat-label">Large→Small</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pg.stom.toLocaleString()}</span>
-          <span class="cite-stat-label">Small→Micro</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${pgConvRate}%</span>
-          <span class="cite-stat-label">Conversion Rate</span>
-        </div>
-      </div>` : ''}
     </div>
 
     <div class="results-header" style="margin-top:1rem">

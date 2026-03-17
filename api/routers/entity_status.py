@@ -363,8 +363,14 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                            "small_10y": 0, "large_10y": 0, "micro_10y": 0, "total_10y": 0},
             "post_grant": {
                 "small": 0, "large": 0, "micro": 0, "total": 0,
-                "stol": 0, "ltos": 0, "stom": 0,
+                "stol": 0, "ltos": 0, "stom": 0, "mtos": 0,
                 "declarations": 0, "converted": 0,
+                "payments": {
+                    "m1551": 0, "m1552": 0, "m1553": 0,
+                    "m2551": 0, "m2552": 0, "m2553": 0,
+                    "m3551": 0, "m3552": 0, "m3553": 0,
+                },
+                "decl_smal": 0, "decl_big": 0, "decl_micr": 0,
             },
             "results": [],
         }
@@ -394,7 +400,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       WHERE m.patent_number IN UNNEST(@pn_list)
         AND (
           {DERIVE_STATUS_SQL} IS NOT NULL
-          OR m.event_code IN ('BIG.', 'SMAL', 'MICR', 'STOL', 'LTOS', 'STOM')
+          OR m.event_code IN ('BIG.', 'SMAL', 'MICR', 'STOL', 'LTOS', 'STOM', 'MTOS')
         )
     ),
     first_status AS (
@@ -414,6 +420,17 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       COUNTIF(b.event_code = 'STOL')  AS trans_stol,
       COUNTIF(b.event_code = 'LTOS')  AS trans_ltos,
       COUNTIF(b.event_code = 'STOM')  AS trans_stom,
+      COUNTIF(b.event_code = 'MTOS')  AS trans_mtos,
+      -- Individual payment codes
+      COUNTIF(b.event_code = 'M1551') AS pay_m1551,
+      COUNTIF(b.event_code = 'M1552') AS pay_m1552,
+      COUNTIF(b.event_code = 'M1553') AS pay_m1553,
+      COUNTIF(b.event_code = 'M2551') AS pay_m2551,
+      COUNTIF(b.event_code = 'M2552') AS pay_m2552,
+      COUNTIF(b.event_code = 'M2553') AS pay_m2553,
+      COUNTIF(b.event_code = 'M3551') AS pay_m3551,
+      COUNTIF(b.event_code = 'M3552') AS pay_m3552,
+      COUNTIF(b.event_code = 'M3553') AS pay_m3553,
       MIN(CASE
         WHEN b.derived_status IS NOT NULL AND b.derived_status != f.first_status
         THEN b.event_date
@@ -499,8 +516,15 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     pg_stol = 0
     pg_ltos = 0
     pg_stom = 0
+    pg_mtos = 0
     pg_declarations = 0
     pg_converted = 0
+    # Individual payment code accumulators
+    pg_m1551 = 0; pg_m1552 = 0; pg_m1553 = 0
+    pg_m2551 = 0; pg_m2552 = 0; pg_m2553 = 0
+    pg_m3551 = 0; pg_m3552 = 0; pg_m3553 = 0
+    # Declaration accumulators
+    pg_decl_smal = 0; pg_decl_big = 0; pg_decl_micr = 0
 
     for r in portfolio_rows:
         app_num = r["application_number"]
@@ -551,9 +575,24 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         pg_stol += pg.get("trans_stol", 0)
         pg_ltos += pg.get("trans_ltos", 0)
         pg_stom += pg.get("trans_stom", 0)
+        pg_mtos += pg.get("trans_mtos", 0)
         pg_declarations += (
             pg.get("decl_big", 0) + pg.get("decl_smal", 0) + pg.get("decl_micr", 0)
         )
+        # Individual payment codes
+        pg_m1551 += pg.get("pay_m1551", 0)
+        pg_m1552 += pg.get("pay_m1552", 0)
+        pg_m1553 += pg.get("pay_m1553", 0)
+        pg_m2551 += pg.get("pay_m2551", 0)
+        pg_m2552 += pg.get("pay_m2552", 0)
+        pg_m2553 += pg.get("pay_m2553", 0)
+        pg_m3551 += pg.get("pay_m3551", 0)
+        pg_m3552 += pg.get("pay_m3552", 0)
+        pg_m3553 += pg.get("pay_m3553", 0)
+        # Declaration codes
+        pg_decl_smal += pg.get("decl_smal", 0)
+        pg_decl_big += pg.get("decl_big", 0)
+        pg_decl_micr += pg.get("decl_micr", 0)
         if pg_first and pg_latest and pg_first != pg_latest:
             pg_converted += 1
 
@@ -607,8 +646,17 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "stol": pg_stol,
             "ltos": pg_ltos,
             "stom": pg_stom,
+            "mtos": pg_mtos,
             "declarations": pg_declarations,
             "converted": pg_converted,
+            "payments": {
+                "m1551": pg_m1551, "m1552": pg_m1552, "m1553": pg_m1553,
+                "m2551": pg_m2551, "m2552": pg_m2552, "m2553": pg_m2553,
+                "m3551": pg_m3551, "m3552": pg_m3552, "m3553": pg_m3553,
+            },
+            "decl_smal": pg_decl_smal,
+            "decl_big": pg_decl_big,
+            "decl_micr": pg_decl_micr,
         },
         "results": results,
     }
