@@ -63,19 +63,38 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
       SELECT DISTINCT reel_frame
       FROM `{settings.assign_documents_table}` d
       WHERE d.patent_number = @id
+    ),
+    -- Aggregate assignors per reel_frame to avoid cross-product duplicates
+    agg_assignors AS (
+      SELECT
+        reel_frame,
+        STRING_AGG(DISTINCT assignor_name, '; ' ORDER BY assignor_name) AS assignors,
+        MIN(assignor_execution_date) AS execution_date
+      FROM `{settings.assign_assignors_table}`
+      WHERE reel_frame IN (SELECT reel_frame FROM matching_docs)
+      GROUP BY reel_frame
+    ),
+    -- Aggregate assignees per reel_frame
+    agg_assignees AS (
+      SELECT
+        reel_frame,
+        STRING_AGG(DISTINCT assignee_name, '; ' ORDER BY assignee_name) AS assignees
+      FROM `{settings.assign_assignees_table}`
+      WHERE reel_frame IN (SELECT reel_frame FROM matching_docs)
+      GROUP BY reel_frame
     )
     SELECT
-      ao.assignor_execution_date,
-      ao.assignor_name,
+      ao.execution_date,
+      ao.assignors,
       ar.conveyance_text,
-      ae.assignee_name,
+      ae.assignees,
       ar.reel_frame,
       ar.recorded_date
     FROM matching_docs md
     JOIN `{settings.assign_records_table}` ar ON ar.reel_frame = md.reel_frame
-    LEFT JOIN `{settings.assign_assignors_table}` ao ON ao.reel_frame = md.reel_frame
-    LEFT JOIN `{settings.assign_assignees_table}` ae ON ae.reel_frame = md.reel_frame
-    ORDER BY ao.assignor_execution_date ASC, ar.recorded_date ASC
+    LEFT JOIN agg_assignors ao ON ao.reel_frame = md.reel_frame
+    LEFT JOIN agg_assignees ae ON ae.reel_frame = md.reel_frame
+    ORDER BY ao.execution_date ASC, ar.recorded_date ASC
     LIMIT 200
     """
 
@@ -83,16 +102,16 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
 
     chain = []
     for r in rows:
-        exec_date = r.get("assignor_execution_date")
+        exec_date = r.get("execution_date")
         chain.append({
             "execution_date": (
                 exec_date.isoformat()
                 if hasattr(exec_date, "isoformat")
                 else str(exec_date) if exec_date else None
             ),
-            "assignor": r.get("assignor_name") or "",
+            "assignor": r.get("assignors") or "",
             "conveyance": r.get("conveyance_text") or "",
-            "assignee": r.get("assignee_name") or "",
+            "assignee": r.get("assignees") or "",
             "reel_frame": r.get("reel_frame") or "",
         })
 

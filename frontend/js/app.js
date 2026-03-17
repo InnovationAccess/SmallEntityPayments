@@ -510,26 +510,21 @@ async function showChainPopup(patentNum, anchorEl) {
   _chainShowTimer = setTimeout(async () => {
     const popup = getOrCreatePopup();
 
-    // Position to the right of the anchor, aligned to its top.
+    // Position to the right of the anchor — fill viewport from anchor to right edge
     const rect = anchorEl.getBoundingClientRect();
     const vpH = window.innerHeight;
     const vpW = window.innerWidth;
-    const popupH = 300;
+    const gap = 8;
 
-    let top = rect.top + window.scrollY;
-    if (rect.top + popupH > vpH) {
-      top = Math.max(window.scrollY + 8, rect.bottom + window.scrollY - popupH);
-    }
-    popup.style.top = `${top}px`;
-    popup.style.left = `${rect.right + window.scrollX + 8}px`;
+    const leftPx = rect.right + window.scrollX + gap;
+    const topPx = window.scrollY + gap;
+    const widthPx = vpW - rect.right - gap * 2;
+    const heightPx = vpH - gap * 2;
 
-    if (rect.right + 8 + 500 > vpW) {
-      popup.style.left = `${Math.max(8, rect.left + window.scrollX - 510)}px`;
-    }
-
-    // Reset any user resize so it fits content naturally for new patent
-    popup.style.width = '';
-    popup.style.height = '';
+    popup.style.top = `${topPx}px`;
+    popup.style.left = `${leftPx}px`;
+    popup.style.width = `${widthPx}px`;
+    popup.style.height = `${heightPx}px`;
 
     popup.innerHTML = '<div class="chain-header"><span>Loading\u2026</span><button class="chain-close-btn" title="Close">\u00D7</button></div><div class="chain-loading">Loading assignments\u2026</div>';
     popup.classList.remove('hidden');

@@ -596,10 +596,6 @@ textarea { resize: vertical; }
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0,0,0,.15);
-  min-width: 400px;
-  max-width: 80vw;
-  min-height: 120px;
-  max-height: 80vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -665,9 +661,6 @@ textarea { resize: vertical; }
   padding: .35rem .5rem;
   border-bottom: 1px solid var(--color-border);
   vertical-align: top;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .chain-td-date { white-space: nowrap; }
 .chain-table tr:hover td { background: #f9fafb; }
