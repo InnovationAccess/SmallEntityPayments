@@ -839,9 +839,17 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
         } else if (cat === 'expired') {
           marker = createIconEl(svgExpired, GRAY, pct, ev);
         } else if (cat === 'reminder') {
-          marker = createIconEl(svgAlarm, GRAY, pct, ev);
+          marker = document.createElement('div');
+          marker.className = 'es-microchart-dot-sm';
+          marker.style.left = pct + '%';
+          marker.style.backgroundColor = '#eab308';
+          marker.title = `${ev.c} \u2014 ${ev.d}`;
         } else if (cat === 'attorney') {
-          marker = createIconEl(svgBriefcase, GRAY, pct, ev);
+          marker = document.createElement('div');
+          marker.className = 'es-microchart-dot-sm';
+          marker.style.left = pct + '%';
+          marker.style.backgroundColor = '#92400e';
+          marker.title = `${ev.c} \u2014 ${ev.d}`;
         } else if (cat.startsWith('decl_') || cat.startsWith('trans_')) {
           // Declarations & transitions are shown by the line color change — no marker
           continue;
@@ -911,16 +919,21 @@ function showMicroChartLegend() {
     legend.appendChild(item);
   }
 
-  // Event icons (gray)
-  const eventEntries = [
-    [svgExpired,   GRAY, 'Expired'],
-    [svgAlarm,     GRAY, 'Reminder'],
-    [svgBriefcase, GRAY, 'Attorney'],
+  // Expired icon (gray)
+  const expItem = document.createElement('span');
+  expItem.className = 'es-microchart-legend-item';
+  expItem.innerHTML = `<span class="es-microchart-legend-icon" style="color:${GRAY}">${svgExpired()}</span>Expired`;
+  legend.appendChild(expItem);
+
+  // Small dot entries (reminder + attorney)
+  const dotEntries = [
+    ['#eab308', 'Reminder'],
+    ['#92400e', 'Attorney'],
   ];
-  for (const [fn, color, label] of eventEntries) {
+  for (const [color, label] of dotEntries) {
     const item = document.createElement('span');
     item.className = 'es-microchart-legend-item';
-    item.innerHTML = `<span class="es-microchart-legend-icon" style="color:${color}">${fn()}</span>${escHtml(label)}`;
+    item.innerHTML = `<span class="es-microchart-legend-dot" style="background:${color}"></span>${escHtml(label)}`;
     legend.appendChild(item);
   }
 

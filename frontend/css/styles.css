@@ -1188,7 +1188,8 @@ textarea { resize: vertical; }
   z-index: 5;
 }
 
-/* Catch-all small gray dot for unrecognised event codes */
+/* Small colored dots (reminder, attorney, and catch-all) */
+.es-microchart-dot-sm,
 .es-microchart-other {
   position: absolute;
   top: 40%;
@@ -1196,10 +1197,11 @@ textarea { resize: vertical; }
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #9ca3af;
   z-index: 1;
   cursor: default;
 }
+.es-microchart-other { background: #9ca3af; }
+.es-microchart-dot-sm:hover,
 .es-microchart-other:hover {
   transform: translate(-50%, -50%) scale(2);
   box-shadow: 0 0 3px rgba(0,0,0,.3);
@@ -1237,6 +1239,13 @@ textarea { resize: vertical; }
   height: 3px;
   border-radius: 1px;
   vertical-align: middle;
+  flex-shrink: 0;
+}
+.es-microchart-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   flex-shrink: 0;
 }
 
