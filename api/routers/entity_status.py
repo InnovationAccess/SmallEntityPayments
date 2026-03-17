@@ -608,6 +608,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       COUNTIF(b.event_code = 'M3551' AND b.during_ownership) AS pay_m3551,
       COUNTIF(b.event_code = 'M3552' AND b.during_ownership) AS pay_m3552,
       COUNTIF(b.event_code = 'M3553' AND b.during_ownership) AS pay_m3553,
+      COUNTIF(b.event_code = 'M1559' AND b.during_ownership) AS pay_m1559,
       MIN(CASE
         WHEN b.during_ownership AND b.derived_status IS NOT NULL
         AND b.derived_status != f.first_status
@@ -767,7 +768,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     _MF_CODE_MAP = [
         ('M1551', 'pay_m1551'), ('M1552', 'pay_m1552'), ('M1553', 'pay_m1553'),
         ('M2551', 'pay_m2551'), ('M2552', 'pay_m2552'), ('M2553', 'pay_m2553'),
-        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'),
+        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'), ('M1559', 'pay_m1559'),
         ('BIG.', 'decl_big'), ('SMAL', 'decl_smal'), ('MICR', 'decl_micr'),
         ('STOL', 'trans_stol'), ('LTOS', 'trans_ltos'),
         ('STOM', 'trans_stom'), ('MTOS', 'trans_mtos'),
@@ -807,7 +808,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     # Individual payment code accumulators
     pg_m1551 = 0; pg_m1552 = 0; pg_m1553 = 0
     pg_m2551 = 0; pg_m2552 = 0; pg_m2553 = 0
-    pg_m3551 = 0; pg_m3552 = 0; pg_m3553 = 0
+    pg_m3551 = 0; pg_m3552 = 0; pg_m3553 = 0; pg_m1559 = 0
     # Declaration accumulators
     pg_decl_smal = 0; pg_decl_big = 0; pg_decl_micr = 0
 
@@ -875,6 +876,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         pg_m3551 += pg.get("pay_m3551", 0)
         pg_m3552 += pg.get("pay_m3552", 0)
         pg_m3553 += pg.get("pay_m3553", 0)
+        pg_m1559 += pg.get("pay_m1559", 0)
         # Declaration codes
         pg_decl_smal += pg.get("decl_smal", 0)
         pg_decl_big += pg.get("decl_big", 0)
@@ -1013,7 +1015,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "payments": {
                 "m1551": pg_m1551, "m1552": pg_m1552, "m1553": pg_m1553,
                 "m2551": pg_m2551, "m2552": pg_m2552, "m2553": pg_m2553,
-                "m3551": pg_m3551, "m3552": pg_m3552, "m3553": pg_m3553,
+                "m3551": pg_m3551, "m3552": pg_m3552, "m3553": pg_m3553, "m1559": pg_m1559,
             },
             "decl_smal": pg_decl_smal,
             "decl_big": pg_decl_big,

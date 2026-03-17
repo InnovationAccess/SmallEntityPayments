@@ -638,6 +638,7 @@ function renderApplicantPortfolio(data) {
               <th style="text-align:center">${statusBadge('SMALL')}</th>
               <th style="text-align:center">${statusBadge('LARGE')}</th>
               <th style="text-align:center"><strong>Total</strong></th>
+              <th style="text-align:center;font-size:0.75rem;line-height:1.1" title="37 CFR 1.28(c) — good-faith error corrections (M1559)">37 CFR<br>1.28(c)</th>
             </tr></thead>
             <tbody>
               <tr>
@@ -646,6 +647,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2551, 'mf:M2551', 'Small 3.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1551, 'mf:M1551', 'Large 3.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row35, 'mf:M3551,M2551,M1551', '3.5-yr Total')}</td>
+                <td></td>
               </tr>
               <tr>
                 <td style="font-weight:600">7.5-yr</td>
@@ -653,6 +655,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2552, 'mf:M2552', 'Small 7.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1552, 'mf:M1552', 'Large 7.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row75, 'mf:M3552,M2552,M1552', '7.5-yr Total')}</td>
+                <td></td>
               </tr>
               <tr>
                 <td style="font-weight:600">11.5-yr</td>
@@ -660,6 +663,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2553, 'mf:M2553', 'Small 11.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1553, 'mf:M1553', 'Large 11.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row115, 'mf:M3553,M2553,M1553', '11.5-yr Total')}</td>
+                <td></td>
               </tr>
             </tbody>
             <tfoot>
@@ -669,6 +673,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right;font-weight:600">${kpi(colSmall, 'mf:M2551,M2552,M2553', 'Small Total')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(colLarge, 'mf:M1551,M1552,M1553', 'Large Total')}</td>
                 <td style="text-align:right;font-weight:700">${kpi(grandTotal, 'mf:M3551,M3552,M3553,M2551,M2552,M2553,M1551,M1552,M1553', 'All Payments')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(pay.m1559 || 0, 'mf:M1559', '37 CFR 1.28(c)')}</td>
               </tr>
             </tfoot>
           </table>
