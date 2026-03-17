@@ -38,7 +38,7 @@ from xml.etree.ElementTree import iterparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from utils.patent_number import normalize_patent_number
-from utils.conveyance_classifier import classify_conveyance
+from utils.conveyance_classifier import classify_conveyance, classify_conveyance_normalized
 
 # Reuse v3 helpers directly
 from etl.parse_assignments_xml_v3 import parse_date, extract_text, _classify_doc_id
@@ -100,6 +100,7 @@ def parse_assignment(elem, source_file: str, min_year: int) -> dict | None:
     # Conveyance
     conveyance_text = extract_text(rec, "conveyance-text") or None
     conveyance_type = classify_conveyance(conveyance_text)
+    normalized_type, review_flag = classify_conveyance_normalized(conveyance_text)
 
     record = {
         "reel_frame": reel_frame,
@@ -110,6 +111,8 @@ def parse_assignment(elem, source_file: str, min_year: int) -> dict | None:
         "page_count": page_count,
         "conveyance_text": conveyance_text,
         "conveyance_type": conveyance_type,
+        "normalized_type": normalized_type,
+        "review_flag": review_flag,
         "employer_assignment": None,
         "correspondent_name": correspondent_name,
         "correspondent_detail": correspondent_detail,
