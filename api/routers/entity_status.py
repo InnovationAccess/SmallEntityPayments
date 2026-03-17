@@ -463,8 +463,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         SELECT d.application_number
         FROM `{settings.assign_documents_table}` d
         JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+        JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
         WHERE a.assignee_name IN ({name_in})
           AND d.application_number IS NOT NULL
+          AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
       )
     )
     SELECT
@@ -539,6 +541,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
       WHERE d.application_number IN UNNEST(@an_list)
         AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
         AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
       GROUP BY d.application_number
     ),
@@ -645,6 +648,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
       WHERE d.application_number IN UNNEST(@an_list)
         AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
         AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
       GROUP BY d.application_number
     ),
@@ -724,6 +728,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
       JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
       WHERE d.application_number IN UNNEST(@an_list)
         AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
         AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
       GROUP BY d.application_number
     ),
