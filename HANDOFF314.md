@@ -23,7 +23,7 @@
 
 ## What Changed Since Last Handoff (HANDOFF313.md -> HANDOFF314.md)
 
-This section covers 5 commits from `217877b` through `efd4c6c`.
+This section covers 8 commits from `217877b` through `fe769c0`.
 
 ### 1. Help Button Fix, Draggable Assignment Popup, Column Pickers (`217877b`)
 
@@ -60,6 +60,29 @@ Added ability to search for entity names using boolean expressions (e.g., `+elec
 4. User clicks a name -> it populates the input, dropdown hides
 5. User clicks "Search Conversions" or "Analyze Portfolio" as normal
 
+### 4. Conveyance Normalization — 14-Category Classification (`f663764`, `62a1dd2`, `fe769c0`)
+
+Classified all 9.07M assignment records in `pat_assign_records` into 14 fine-grained `normalized_type` categories, replacing the coarse 8-category `conveyance_type` (which lumped 92.6% of records as "ASSIGNMENT").
+
+**New columns on `pat_assign_records`:**
+- `normalized_type STRING` — one of 14 values (employee, divestiture, name_change, government, security, merger, release, review, address_change, license, correction, court_order, partial_release, license_termination)
+- `review_flag BOOLEAN` — TRUE for uncertain records needing human review
+- `employer_assignment BOOLEAN` — TRUE for employee assignments, FALSE for all others (was previously always NULL)
+
+**Classification approach (3-layer):**
+1. **Rule-based text matching** (~461K records): regex patterns on `conveyance_text` identify non-assignment types (name_change, government, security, release, license, correction, etc.)
+2. **Corporate assignor filter** (~564K records): if ALL assignors are corporate entities (Inc., Corp., LLC, GmbH, University, etc.) → `divestiture`
+3. **Inventor name matching** (~8M records): joins assignor names against `pfw_inventors` via `pat_assign_documents.application_number`. Uses majority-match rule (≥50% of person-assignors match inventors → `employee`). Three matching strategies: last name + first initial, full name format flip, last-name-only fuzzy fallback.
+
+**Files created/modified:**
+- `etl/normalize_conveyance.py` — **CREATED**: One-time migration script (21 steps, completed in 6.2 min)
+- `utils/conveyance_classifier.py` — **MODIFIED**: Added `classify_conveyance_normalized()` returning `(normalized_type, review_flag)` for parser-time classification
+- `etl/parse_assignments_xml_v4.py` — **MODIFIED**: Outputs `normalized_type` and `review_flag` in record dicts
+- `etl/update_pipeline.py` — **MODIFIED**: Added `resolve_assignment_pending()` post-load step for PASDL daily updates
+- `database/setup_v4.sql` — **MODIFIED**: Added `normalized_type` and `review_flag` columns
+
+**Daily pipeline integration:** New PASDL records get `normalized_type = 'assignment_pending'` at parse time, then `resolve_assignment_pending()` runs after BigQuery load to classify them via corporate filter + inventor matching.
+
 ---
 
 ## Domain Terminology
@@ -77,7 +100,10 @@ Added ability to search for entity names using boolean expressions (e.g., `+elec
 | **Entity Status** | Whether a patent applicant qualifies as "small entity" (reduced fees), "micro entity", or "large entity" |
 | **Forward Citations** | Patents that cite a given patent — indicates the patent's influence on later innovations |
 | **Conveyance** | The type of ownership transfer in a patent assignment (e.g., "ASSIGNMENT OF ASSIGNORS INTEREST") |
-| **Conveyance Type** | Classified category of conveyance (ASSIGNMENT, SECURITY_INTEREST, MERGER, RELEASE, LICENSE, GOVERNMENT_INTEREST, CORRECTION, OTHER) |
+| **Conveyance Type** | Coarse classification of conveyance (8 categories: ASSIGNMENT, SECURITY_INTEREST, MERGER, RELEASE, LICENSE, GOVERNMENT_INTEREST, CORRECTION, OTHER) |
+| **Normalized Type** | Fine-grained classification of conveyance into 14 categories: employee, divestiture, name_change, government, security, merger, release, review, address_change, license, correction, court_order, partial_release, license_termination. Stored in `pat_assign_records.normalized_type` |
+| **Employer Assignment** | Boolean indicating whether the assignment is an inventor-to-employer transfer (`pat_assign_records.employer_assignment`). Determined by matching assignor names against `pfw_inventors` |
+| **Review Flag** | Boolean flag on assignment records where the classification is uncertain and needs human review (`pat_assign_records.review_flag`) |
 | **Reel/Frame** | The physical recording location of a patent assignment at the USPTO — used as the primary key linking the 4 assignment tables |
 | **CPC Codes** | Cooperative Patent Classification — hierarchical codes classifying a patent's technology area |
 | **Kind Code** | A letter suffix on a patent number indicating the document type (B1=granted patent without prior pub, B2=with prior pub, A1=application pub) |
@@ -109,7 +135,7 @@ Cloud Run Service (uspto-api, us-central1)
     |
     v
 Google BigQuery (us-west1, dataset: uspto_data)
-    |-- 12 tables, ~828M rows, ~62 GB
+    |-- 23+ tables, ~1B rows, ~81 GB
     |
 Google Vertex AI (us-central1)
     |-- Gemini model for natural language -> SQL (AI assistant)
@@ -360,7 +386,7 @@ Uses Gemini 2.5 Flash for PDF vision extraction. PDFs are stored in `gs://uspto-
 | `patent_file_wrapper_v2` | 12,733,017 | 3.9 GB | application_number, patent_number | One row per patent application — filing date, grant date, entity status, applicant, inventor |
 | `pfw_continuity` | 12,253,958 | 1.6 GB | application_number | Parent/child relationships between patent applications |
 | `pat_assign_assignees` | 9,430,399 | 1.36 GB | reel_frame, assignee_name | One row per assignee per assignment (with address fields) |
-| `pat_assign_records` | 9,071,498 | 1.80 GB | reel_frame | One row per assignment transaction (conveyance, recorded date). Partitioned by `recorded_date` (MONTH) |
+| `pat_assign_records` | 9,071,498 | 1.80 GB | reel_frame | One row per assignment transaction (conveyance, recorded date, normalized_type, employer_assignment, review_flag). Partitioned by `recorded_date` (MONTH) |
 | `entity_names` | 7,684,636 | 0.24 GB | entity_name | Aggregated unique entity names with frequency counts |
 | `name_unification` | 64 | <0.01 GB | — | User-curated MDM associations. **DO NOT MODIFY PROGRAMMATICALLY** |
 | `etl_log` | ~10 | <0.01 GB | source, started_at | Pipeline run tracking |
@@ -378,7 +404,7 @@ Uses Gemini 2.5 Flash for PDF vision extraction. PDFs are stored in `gs://uspto-
 ### Data Sources and Loading
 - **patent_file_wrapper_v2, pfw_transactions, pfw_continuity** — Parsed from PTFWPRE JSON ZIPs by `etl/parse_pfw.py`
 - **forward_citations** — Parsed from PTBLXML XML ZIPs by `etl/parse_ptblxml.py`
-- **pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents** — Parsed from PASYR/PASDL XML ZIPs by `etl/parse_assignments_xml_v4.py` (produces 4 JSONL.gz files per shard)
+- **pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents** — Parsed from PASYR/PASDL XML ZIPs by `etl/parse_assignments_xml_v4.py` (produces 4 JSONL.gz files per shard). After load, `resolve_assignment_pending()` in `update_pipeline.py` classifies `assignment_pending` records into employee/divestiture/review using corporate filter + inventor name matching against `pfw_inventors`
 - **maintenance_fee_events_v2** — Parsed from PTMNFEE2 fixed-width text by `etl/parse_maintenance_fees_v2.py`
 - **entity_names** — Rebuilt by SQL aggregation from `patent_file_wrapper_v2`, `pat_assign_assignees`, and `pat_assign_assignors`
 - **name_unification** — User-curated (64 rows); modified only through the MDM UI
@@ -515,12 +541,13 @@ SmallEntityPayments/
 │   ├── setup_v3.sql              # v3 DDL (superseded by v4)
 │   └── setup_v4.sql              # v4 DDL — 4 normalized assignment tables
 ├── etl/                          # ETL scripts
-│   ├── update_pipeline.py        # Master orchestrator (Cloud Run Job entrypoint, uses v4 parser)
+│   ├── update_pipeline.py        # Master orchestrator (Cloud Run Job entrypoint, uses v4 parser, incl. resolve_assignment_pending())
 │   ├── download_ptblxml.py       # PTBLXML downloader (citations)
 │   ├── download_pasdl.py         # PASDL downloader (daily assignments)
 │   ├── download_ptmnfee2.py      # PTMNFEE2 downloader (maintenance fees)
 │   ├── parse_ptblxml.py          # Citation XML parser
-│   ├── parse_assignments_xml_v4.py  # v4 assignment XML parser (4-file normalized output) — CURRENT
+│   ├── normalize_conveyance.py    # One-time migration: classify 9M records into normalized_type (already run)
+│   ├── parse_assignments_xml_v4.py  # v4 assignment XML parser (4-file normalized output, incl. normalized_type) — CURRENT
 │   ├── parse_assignments_xml_v3.py  # v3 assignment parser (flat output, superseded)
 │   ├── parse_assignments_xml_v2.py  # v2 assignment parser (superseded)
 │   ├── parse_assignments_xml.py  # v1 assignment parser (obsolete)
@@ -549,7 +576,7 @@ SmallEntityPayments/
 ├── utils/
 │   ├── __init__.py
 │   ├── patent_number.py          # Patent number normalization utility
-│   └── conveyance_classifier.py  # Classifies raw conveyance text into categories
+│   └── conveyance_classifier.py  # Classifies raw conveyance text: classify_conveyance() (coarse) + classify_conveyance_normalized() (fine-grained)
 ├── tools/
 │   └── extract_fee_codes.py      # Fee code extraction utility
 ├── tests/
@@ -704,13 +731,16 @@ Note: `prosecution.py` also uses `httpx` and `google-cloud-storage` which are in
 ## Git State
 
 - **Current branch:** `main`
-- **Latest commit:** `efd4c6c` — "Add boolean name search to Entity Status applicant fields"
+- **Latest commit:** `fe769c0` — "Add review as a standalone normalized type for human-review assignments"
 - **Open PRs:** None
 - **Uncommitted work:** None (clean tree)
 - **Branching convention:** Work is done in worktree branches (`claude/*`), merged to `main` via fast-forward
 
 ### Recent Commits (newest first)
 ```
+fe769c0 Add review as a standalone normalized type for human-review assignments
+62a1dd2 Add court_order as a standalone normalized assignment type
+f663764 Add normalized_type classification for 9M assignment records
 efd4c6c Add boolean name search to Entity Status applicant fields
 91b37dd Fix assignment chain returning irrelevant patents due to number collision
 217877b Add help button fix, draggable assignment popup, and column pickers to all tables
@@ -719,9 +749,6 @@ efd4c6c Add boolean name search to Entity Status applicant fields
 2e43119 Fix PDF download: follow redirects from USPTO API
 8800331 Add Phase 3 prosecution invoice retrieval and AI extraction
 e241c2e Add Prosecution Fee Investigation tab (Phase 1 + 2) and PDF extraction prototype
-4d18b7b Add Entity Status Analytics tab (derives status from event codes)
-7ccb1f4 Add tests, HANDOFF313, and check in cloudbuild-etl.yaml
-e757c3c Normalize patent assignments into 4 tables (v4)
 ```
 
 ### Currently Deployed

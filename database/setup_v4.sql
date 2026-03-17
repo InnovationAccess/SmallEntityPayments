@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS `uspto_data.pat_assign_records` (
   page_count               INT64,
   conveyance_text          STRING,
   conveyance_type          STRING,
+  normalized_type          STRING,
+  review_flag              BOOLEAN,
   employer_assignment      BOOLEAN,
   correspondent_name       STRING,
   correspondent_detail     STRING,

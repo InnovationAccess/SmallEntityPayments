@@ -52,15 +52,17 @@
 - All BigQuery tables use flat/denormalized schemas (no STRUCT/ARRAY except cpc_codes)
 - Cross-table joins use application_number as the universal key (not patent_number)
 
-## Current State (2026-03-15)
+## Current State (2026-03-17)
 - All tables loaded: ~1.0 billion rows across 23 tables (~81.5 GB)
 - Patent assignments normalized into 4 tables (v4): pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents — linked by reel_frame, cross-table joins via application_number
 - Old patent_assignments_v2 and patent_assignments_v3 tables dropped
-- 4 automated update pipelines running on Cloud Scheduler (PASDL uses v4 parser)
+- **Conveyance normalization complete**: All 9.07M assignment records classified into 14 fine-grained `normalized_type` categories (see Normalized Assignment Types below). The `employer_assignment` boolean is fully populated. 15,806 uncertain records flagged as `review` for human review.
+- PASDL daily pipeline automatically normalizes new records: parser outputs `assignment_pending`, then `resolve_assignment_pending()` runs corporate filter + inventor matching post-load
+- 4 automated update pipelines running on Cloud Scheduler (PASDL uses v4 parser with normalized_type output)
 - 8 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status (+ Applicant Portfolio), Prosecution Fees, Update Log
 - 11 new pfw_* tables added (Part A expansion): pfw_applicants, pfw_inventors, pfw_child_continuity, pfw_foreign_priority, pfw_publications, pfw_patent_term_adjustment, pfw_pta_history, pfw_correspondence_address, pfw_attorneys, pfw_document_metadata, pfw_embedded_assignments
-- pfw_applicants and pfw_inventors currently have 2021-2026 data only — 2001-2020 backfill running via Cloud Run Job `uspto-backfill-pfw`
-- entity_names will be rebuilt after backfill completes (currently 4.94M names; will grow to ~12-15M once pfw_inventors covers 2001-2026)
+- pfw_applicants and pfw_inventors fully loaded with 2001-2026 data (35.7M rows in pfw_inventors)
+- entity_names: 7.68M rows
 - All tables have sticky headers, sortable columns, column pickers, and assignment chain popup on patent numbers
 - Assignment popup is movable (drag header) and resizable (drag corner)
 - Citation tab includes examiner/applicant breakdown lists with name normalization
@@ -68,6 +70,38 @@
 - Prosecution Fees tab has 3-phase workflow: entity discovery, application drill-down, invoice extraction via Gemini Vision
 - ETL pipeline logging writes to `etl_log` BigQuery table
 - cloudbuild-etl.yaml checked into repo root (was previously only at /tmp/)
+
+## Normalized Assignment Types
+The `pat_assign_records.normalized_type` column classifies each assignment into one of 14 categories:
+
+| normalized_type | Count | Meaning |
+|---|---|---|
+| employee | 7,881,089 (86.9%) | Inventors assigning to their employer (verified by matching assignor names against pfw_inventors) |
+| divestiture | 704,504 (7.8%) | Patent assets sold/transferred between corporate entities |
+| name_change | 173,915 (1.9%) | Entity name or legal form change (no ownership change) |
+| government | 105,941 (1.2%) | Government interest / confirmatory license (Bayh-Dole) |
+| security | 74,665 (0.8%) | Security interest granted (loan collateral) |
+| merger | 51,389 (0.6%) | Acquirer takes target's assets (actual ownership change) |
+| release | 34,200 (0.4%) | Security interest fully terminated |
+| review | 15,806 (0.2%) | Uncertain classification, flagged for human review |
+| address_change | 13,821 (0.2%) | Address update only |
+| license | 6,490 (0.1%) | License granted under patent assets |
+| correction | 3,420 (<0.1%) | Typo/error fix in a prior recordation (no new rights) |
+| court_order | 855 (<0.1%) | Court-ordered transfer (typically bankruptcy) |
+| partial_release | 596 (<0.1%) | Subset of collateralized assets released |
+| license_termination | 60 (<0.1%) | License terminated |
+
+**Classification approach:**
+- Rule-based regex matching on `conveyance_text` for non-assignment types (~461K records)
+- Corporate assignor filter: if ALL assignors are corporate entities (Inc., Corp., LLC, etc.) → divestiture (~564K records)
+- Inventor name matching: join assignor names against `pfw_inventors` via `pat_assign_documents.application_number`. Majority-match rule (≥50% of person-assignors match inventors → employee). Typo-resilient: one non-matching name among several matches doesn't prevent classification.
+- `employer_assignment` boolean: TRUE for employee, FALSE for all others
+- `review_flag` boolean: TRUE for uncertain records needing human review
+
+**Related files:**
+- `utils/conveyance_classifier.py` — `classify_conveyance_normalized()` for parser-time classification
+- `etl/normalize_conveyance.py` — One-time migration script (already run)
+- `etl/update_pipeline.py` — `resolve_assignment_pending()` for daily pipeline post-load normalization
 
 ## Tech Stack
 - Backend: Python/FastAPI on Google Cloud Run
@@ -95,6 +129,7 @@
 - Orchestrator: etl/update_pipeline.py (entrypoint for Cloud Run Jobs)
 - Sources: ptblxml (citations), pasdl (assignments), ptmnfee2 (maint fees), ptfwpre (file wrapper)
 - Each source has its own Cloud Run Job and Cloud Scheduler trigger
+- PASDL post-load step: `resolve_assignment_pending()` classifies new assignment records (corporate filter → inventor matching → employee/divestiture/review)
 - Logs each run to the `etl_log` BigQuery table
 
 ## Environment Variables

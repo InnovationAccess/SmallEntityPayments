@@ -300,6 +300,11 @@ def update_pasdl(work_dir: str) -> dict:
                 os.unlink(tmp_path)
             time.sleep(2)
 
+    # Resolve assignment_pending records (employee vs divestiture)
+    if stats["processed"] > 0:
+        print("\nResolving assignment_pending records (employee vs divestiture)...", file=sys.stderr)
+        resolve_assignment_pending()
+
     # Rebuild entity_names after assignment updates
     print("\nRebuilding entity_names after PASDL update...", file=sys.stderr)
     rebuild_entity_names()
@@ -542,6 +547,152 @@ def update_ptfwpre(work_dir: str) -> dict:
             os.unlink(tmp_path)
 
     return stats
+
+
+# ─── Assignment Normalization (post-load) ─────────────────────────
+
+def resolve_assignment_pending():
+    """Resolve 'assignment_pending' normalized_type records into employee or divestiture.
+
+    Called after PASDL daily loads. The parser sets normalized_type='assignment_pending'
+    for records that need a BigQuery join against pfw_inventors to determine if the
+    assignment is an employee assignment or a divestiture.
+
+    Steps:
+      1. Corporate assignor filter -> divestiture
+      2. Inventor name matching -> employee vs divestiture (majority-match rule)
+      3. Remaining -> divestiture + review_flag
+    """
+    CORPORATE_REGEX = (
+        r'\\b(INC\\.?|INCORPORATED|CORP\\.?|CORPORATION|LLC|L\\.L\\.C\\.|'
+        r'LTD\\.?|LIMITED|CO\\.|COMPANY|COMPANIES|LP|L\\.P\\.|LLP|L\\.L\\.P\\.|'
+        r'GMBH|AG|S\\.A\\.|SA|PLC|P\\.L\\.C\\.|N\\.V\\.|NV|BV|B\\.V\\.|'
+        r'KK|KABUSHIKI|PTY|PTE|S\\.R\\.L\\.|SRL|'
+        r'FOUNDATION|TRUST|UNIVERSITY|UNIVERSITE|UNIVERSITAT|'
+        r'INSTITUT|INSTITUTE|COLLEGE|SCHOOL|HOSPITAL|'
+        r'NATIONAL|LABORATORIES|LABORATORY|TECHNOLOGIES|SYSTEMS|'
+        r'GROUP|HOLDINGS|ENTERPRISES|INDUSTRIES|INTERNATIONAL|'
+        r'THE REGENTS|THE TRUSTEES|THE BOARD|COUNCIL|ASSOCIATION|'
+        r'MINISTRY|GOVERNMENT|DEPARTMENT|AGENCY|AUTHORITY|'
+        r'COOPERATIVE|FEDERATION|CONSORTIUM)\\b'
+    )
+
+    # Step 1: Corporate assignor filter
+    print("  Step 1: Corporate assignor filter...", file=sys.stderr)
+    bq_query(f"""
+UPDATE `{BQ_DATASET}.pat_assign_records` r
+SET r.normalized_type = 'divestiture',
+    r.employer_assignment = FALSE
+WHERE r.normalized_type = 'assignment_pending'
+  AND r.reel_frame IN (
+    SELECT reel_frame
+    FROM (
+      SELECT a.reel_frame,
+        COUNTIF(a.assignor_name IS NOT NULL
+          AND NOT REGEXP_CONTAINS(UPPER(a.assignor_name), r'{CORPORATE_REGEX}')
+        ) AS non_corporate_count
+      FROM `{BQ_DATASET}.pat_assign_assignors` a
+      WHERE a.reel_frame IN (
+        SELECT reel_frame FROM `{BQ_DATASET}.pat_assign_records`
+        WHERE normalized_type = 'assignment_pending'
+      )
+      GROUP BY a.reel_frame
+    )
+    WHERE non_corporate_count = 0
+  )
+""", timeout=1200)
+
+    # Step 2: Create staging table for inventor matching
+    print("  Step 2: Inventor name matching...", file=sys.stderr)
+    bq_query(f"""
+CREATE OR REPLACE TABLE `{BQ_DATASET}._tmp_pasdl_inv_match` AS
+WITH
+unclassified AS (
+  SELECT reel_frame FROM `{BQ_DATASET}.pat_assign_records`
+  WHERE normalized_type = 'assignment_pending'
+),
+person_assignors AS (
+  SELECT DISTINCT a.reel_frame, a.assignor_name,
+    UPPER(TRIM(SPLIT(a.assignor_name, ',')[SAFE_OFFSET(0)])) AS assignor_last,
+    UPPER(TRIM(SPLIT(a.assignor_name, ',')[SAFE_OFFSET(1)])) AS assignor_first_part
+  FROM `{BQ_DATASET}.pat_assign_assignors` a
+  JOIN unclassified u ON u.reel_frame = a.reel_frame
+  WHERE a.assignor_name IS NOT NULL
+    AND NOT REGEXP_CONTAINS(UPPER(a.assignor_name), r'{CORPORATE_REGEX}')
+),
+doc_apps AS (
+  SELECT DISTINCT d.reel_frame, d.application_number
+  FROM `{BQ_DATASET}.pat_assign_documents` d
+  JOIN unclassified u ON u.reel_frame = d.reel_frame
+  WHERE d.application_number IS NOT NULL
+),
+app_inventors AS (
+  SELECT DISTINCT da.reel_frame,
+    UPPER(i.inventor_name) AS inv_name_upper,
+    UPPER(i.last_name) AS inv_last,
+    UPPER(i.first_name) AS inv_first
+  FROM `{BQ_DATASET}.pfw_inventors` i
+  JOIN doc_apps da ON da.application_number = i.application_number
+  WHERE i.last_name IS NOT NULL
+),
+assignor_matches AS (
+  SELECT pa.reel_frame, pa.assignor_name,
+    CASE WHEN EXISTS (
+      SELECT 1 FROM app_inventors ai
+      WHERE ai.reel_frame = pa.reel_frame
+        AND (
+          (ai.inv_last = pa.assignor_last AND ai.inv_first IS NOT NULL
+           AND pa.assignor_first_part IS NOT NULL
+           AND LENGTH(pa.assignor_first_part) > 0 AND LENGTH(ai.inv_first) > 0
+           AND SUBSTR(pa.assignor_first_part, 1, 1) = SUBSTR(ai.inv_first, 1, 1))
+          OR ai.inv_name_upper = CONCAT(COALESCE(pa.assignor_first_part, ''), ' ', pa.assignor_last)
+          OR ai.inv_name_upper = UPPER(pa.assignor_name)
+          OR (ai.inv_last = pa.assignor_last AND LENGTH(pa.assignor_last) >= 3)
+        )
+    ) THEN TRUE ELSE FALSE END AS matches_inventor
+  FROM person_assignors pa
+)
+SELECT reel_frame,
+  COUNT(*) AS total_person_assignors,
+  COUNTIF(matches_inventor) AS matching_assignors
+FROM assignor_matches
+GROUP BY reel_frame
+""", timeout=1200)
+
+    # Majority match -> employee
+    bq_query(f"""
+UPDATE `{BQ_DATASET}.pat_assign_records` r
+SET r.normalized_type = 'employee', r.employer_assignment = TRUE
+WHERE r.normalized_type = 'assignment_pending'
+  AND r.reel_frame IN (
+    SELECT reel_frame FROM `{BQ_DATASET}._tmp_pasdl_inv_match`
+    WHERE matching_assignors > 0
+      AND (matching_assignors = total_person_assignors
+           OR (total_person_assignors > 1 AND matching_assignors * 2 >= total_person_assignors))
+  )
+""", timeout=600)
+
+    # Zero match -> divestiture
+    bq_query(f"""
+UPDATE `{BQ_DATASET}.pat_assign_records` r
+SET r.normalized_type = 'divestiture', r.employer_assignment = FALSE
+WHERE r.normalized_type = 'assignment_pending'
+  AND r.reel_frame IN (
+    SELECT reel_frame FROM `{BQ_DATASET}._tmp_pasdl_inv_match`
+    WHERE matching_assignors = 0
+  )
+""", timeout=600)
+
+    # Remaining assignment_pending -> review
+    bq_query(f"""
+UPDATE `{BQ_DATASET}.pat_assign_records`
+SET normalized_type = 'review', employer_assignment = FALSE, review_flag = TRUE
+WHERE normalized_type = 'assignment_pending'
+""", timeout=600)
+
+    # Cleanup
+    bq_query(f"DROP TABLE IF EXISTS `{BQ_DATASET}._tmp_pasdl_inv_match`", timeout=60)
+    print("  Assignment normalization complete.", file=sys.stderr)
 
 
 # ─── Entity Names Rebuild ────────────────────────────────────────
