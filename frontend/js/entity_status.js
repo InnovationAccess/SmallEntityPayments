@@ -58,6 +58,7 @@ function classifyEvent(code) {
   if (code === 'LTOS' || code === 'MTOS') return 'trans_to_small';
   if (code === 'STOM') return 'trans_to_micro';
   if (code === 'EXP.') return 'expired';
+  if (code === 'GRNT') return 'grant';
   if (code.startsWith('REM')) return 'reminder';
   if (code === 'ASPN') return 'attorney';
   return 'other';
@@ -849,6 +850,12 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
           marker = createIconEl(svgPerson, STATUS_COLORS.micro, pct, ev);
         } else if (cat === 'expired') {
           marker = createIconEl(svgExpired, GRAY, pct, ev);
+        } else if (cat === 'grant') {
+          marker = document.createElement('div');
+          marker.className = 'es-microchart-dot-sm';
+          marker.style.left = pct + '%';
+          marker.style.backgroundColor = '#8b5cf6'; // purple
+          marker.title = `Grant \u2014 ${ev.d}`;
         } else if (cat === 'reminder') {
           marker = document.createElement('div');
           marker.className = 'es-microchart-dot-sm';
@@ -936,8 +943,9 @@ function showMicroChartLegend() {
   expItem.innerHTML = `<span class="es-microchart-legend-icon" style="color:${GRAY}">${svgExpired()}</span>Expired`;
   legend.appendChild(expItem);
 
-  // Small dot entries (reminder + attorney)
+  // Small dot entries (grant + reminder + attorney)
   const dotEntries = [
+    ['#8b5cf6', 'Grant Date'],
     ['#eab308', 'Reminder'],
     ['#92400e', 'Attorney'],
   ];

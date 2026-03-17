@@ -306,7 +306,9 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
     """Fetch event timelines for multiple patents (max 200).
 
     Returns event_date + event_code per patent, grouped by patent_number.
-    Used by the frontend micro chart visualization.
+    Merges prosecution declarations (from pfw_transactions) + grant date
+    + post-grant events (from maintenance_fee_events_v2) into a single
+    chronologically-sorted timeline per patent.
     """
     if not req.patent_numbers:
         return {"timelines": {}, "date_range": None}
@@ -314,19 +316,91 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
     pn_list = req.patent_numbers[:200]
     params = [bigquery.ArrayQueryParameter("pn_list", "STRING", pn_list)]
 
-    sql = f"""
+    # ── 1. Post-grant maintenance events ─────────────────────────
+    maint_sql = f"""
     SELECT patent_number, event_date, event_code
     FROM `{settings.maintenance_table}`
     WHERE patent_number IN UNNEST(@pn_list)
     ORDER BY patent_number, event_date ASC
     """
-    rows = bq_service.run_query(sql, params)
+    maint_rows = bq_service.run_query(maint_sql, params)
 
+    # ── 2. Patent lookup: application_number + grant_date ────────
+    pfw_sql = f"""
+    SELECT patent_number, application_number, grant_date
+    FROM `{settings.patent_table}`
+    WHERE patent_number IN UNNEST(@pn_list)
+    """
+    pfw_rows = bq_service.run_query(pfw_sql, params)
+
+    # Map patent_number → application_number and grant_date
+    pn_to_app: Dict[str, str] = {}
+    pn_to_grant: Dict[str, Any] = {}
+    for r in pfw_rows:
+        pn = r["patent_number"]
+        if r.get("application_number"):
+            pn_to_app[pn] = r["application_number"]
+        if r.get("grant_date"):
+            pn_to_grant[pn] = r["grant_date"]
+
+    # ── 3. Prosecution declarations (SMAL, BIG., MICR from pfw_transactions)
+    app_nums = list(set(pn_to_app.values()))
+    pros_events: Dict[str, list] = {}  # app_num → list of (date, code)
+    if app_nums:
+        pros_params = [
+            bigquery.ArrayQueryParameter("an_list", "STRING", app_nums),
+        ]
+        pros_sql = f"""
+        SELECT application_number, event_date, event_code
+        FROM `{settings.pfw_transactions_table}`
+        WHERE application_number IN UNNEST(@an_list)
+          AND event_code IN ('SMAL', 'BIG.', 'MICR')
+        ORDER BY application_number, event_date ASC
+        """
+        pros_rows = bq_service.run_query(pros_sql, pros_params)
+        for r in pros_rows:
+            an = r["application_number"]
+            if an not in pros_events:
+                pros_events[an] = []
+            pros_events[an].append((r["event_date"], r["event_code"]))
+
+    # ── 4. Build unified timelines ───────────────────────────────
     timelines: Dict[str, list] = {}
     global_min = None
     global_max = None
 
-    for r in rows:
+    def _update_range(ed):
+        nonlocal global_min, global_max
+        if ed:
+            if global_min is None or ed < global_min:
+                global_min = ed
+            if global_max is None or ed > global_max:
+                global_max = ed
+
+    # 4a. Add prosecution declarations (keyed by app_num → patent_num)
+    app_to_pn: Dict[str, list] = {}
+    for pn, an in pn_to_app.items():
+        app_to_pn.setdefault(an, []).append(pn)
+
+    for an, evts in pros_events.items():
+        for pn in app_to_pn.get(an, []):
+            if pn not in timelines:
+                timelines[pn] = []
+            for (ed, ec) in evts:
+                date_str = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)
+                timelines[pn].append({"d": date_str, "c": ec})
+                _update_range(ed)
+
+    # 4b. Add grant date as synthetic GRNT event
+    for pn, gd in pn_to_grant.items():
+        if pn not in timelines:
+            timelines[pn] = []
+        date_str = gd.isoformat() if hasattr(gd, "isoformat") else str(gd)
+        timelines[pn].append({"d": date_str, "c": "GRNT"})
+        _update_range(gd)
+
+    # 4c. Add post-grant maintenance events
+    for r in maint_rows:
         pn = r["patent_number"]
         ed = r["event_date"]
         ec = r["event_code"]
@@ -334,11 +408,11 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
             timelines[pn] = []
         date_str = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)
         timelines[pn].append({"d": date_str, "c": ec})
-        if ed:
-            if global_min is None or ed < global_min:
-                global_min = ed
-            if global_max is None or ed > global_max:
-                global_max = ed
+        _update_range(ed)
+
+    # 4d. Sort each timeline chronologically
+    for pn in timelines:
+        timelines[pn].sort(key=lambda e: e["d"])
 
     return {
         "timelines": timelines,
