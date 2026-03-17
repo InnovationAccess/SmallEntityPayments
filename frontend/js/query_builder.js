@@ -215,7 +215,7 @@ function addConditionRow(defaultField = '', defaultOp = '', defaultVal = '') {
       } else {
         inp.type = 'text';
         inp.placeholder = _NAME_FIELDS_SET.has(field)
-          ? 'e.g. +elect* +tele*'
+          ? 'e.g. +elect +tele  or  samsung'
           : 'Value\u2026';
       }
     }
