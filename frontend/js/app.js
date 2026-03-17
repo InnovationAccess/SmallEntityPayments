@@ -549,12 +549,16 @@ async function showChainPopup(patentNum, anchorEl) {
       return;
     }
 
+    /* Split semicolon-separated names into one-per-line for readability */
+    const multiLine = (s) =>
+      (s || '').split('; ').map(n => escHtml(n.trim())).filter(Boolean).join('<br>');
+
     const rows = chain.map(a =>
       `<tr>
         <td class="chain-td-date">${escHtml(a.execution_date || '\u2014')}</td>
-        <td>${escHtml(a.assignor)}</td>
+        <td>${multiLine(a.assignor)}</td>
         <td>${escHtml(a.conveyance)}</td>
-        <td>${escHtml(a.assignee)}</td>
+        <td>${multiLine(a.assignee)}</td>
       </tr>`
     ).join('');
 
