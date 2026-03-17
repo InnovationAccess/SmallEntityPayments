@@ -803,17 +803,28 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       let currentColor = initColor;
       const changePoints = [];
 
+      // Find expiration point — line stops there
+      let endPct = 100;
+      for (const ev of events) {
+        if (ev.c === 'EXP.') {
+          const expDate = new Date(ev.d);
+          endPct = clampPct(((expDate.getTime() - minDate.getTime()) / totalMs) * 100);
+          break;
+        }
+      }
+
       for (const ev of events) {
         const newColor = statusColorForEvent(ev.c);
         if (newColor && newColor !== currentColor) {
           const evDate = new Date(ev.d);
           const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+          if (pct >= endPct) break; // don't add change points past expiration
           changePoints.push({ pct, color: newColor });
           currentColor = newColor;
         }
       }
 
-      // Draw line segments across full track width
+      // Draw line segments up to expiration point (or full width if no EXP.)
       let prevPct = 0;
       let lineColor = initColor;
       for (const cp of changePoints) {
@@ -821,7 +832,7 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
         lineColor = cp.color;
         prevPct = cp.pct;
       }
-      appendLine(track, prevPct, 100 - prevPct, lineColor);
+      appendLine(track, prevPct, endPct - prevPct, lineColor);
 
       // ── Place icons on top of the line ──
       for (const ev of events) {
