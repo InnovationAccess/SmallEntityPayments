@@ -532,14 +532,14 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     first_status AS (
       SELECT
         patent_number,
-        ARRAY_AGG(derived_status ORDER BY event_date ASC LIMIT 1)[OFFSET(0)] AS first_status
+        ARRAY_AGG(derived_status IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_status
       FROM base
       GROUP BY patent_number
     )
     SELECT
       b.patent_number,
       f.first_status                                                          AS first_maint_status,
-      ARRAY_AGG(b.derived_status ORDER BY b.event_date DESC LIMIT 1)[OFFSET(0)] AS latest_maint_status,
+      ARRAY_AGG(b.derived_status IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
       COUNTIF(b.event_code = 'BIG.')  AS decl_big,
       COUNTIF(b.event_code = 'SMAL')  AS decl_smal,
       COUNTIF(b.event_code = 'MICR')  AS decl_micr,
@@ -708,10 +708,11 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 pg_large += 1
             elif pg_first == "MICRO":
                 pg_micro += 1
-        pg_stol += pg.get("trans_stol", 0)
-        pg_ltos += pg.get("trans_ltos", 0)
-        pg_stom += pg.get("trans_stom", 0)
-        pg_mtos += pg.get("trans_mtos", 0)
+        # Count PATENTS with transitions (not total events)
+        pg_stol += 1 if pg.get("trans_stol", 0) > 0 else 0
+        pg_ltos += 1 if pg.get("trans_ltos", 0) > 0 else 0
+        pg_stom += 1 if pg.get("trans_stom", 0) > 0 else 0
+        pg_mtos += 1 if pg.get("trans_mtos", 0) > 0 else 0
         pg_declarations += (
             pg.get("decl_big", 0) + pg.get("decl_smal", 0) + pg.get("decl_micr", 0)
         )
