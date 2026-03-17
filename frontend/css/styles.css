@@ -1188,12 +1188,12 @@ textarea { resize: vertical; }
   z-index: 5;
 }
 
-/* Small colored dots (reminder, attorney, and catch-all) */
+/* Small colored dots (reminder, attorney, and catch-all) — on the status line */
 .es-microchart-dot-sm,
 .es-microchart-other {
   position: absolute;
-  top: 40%;
-  transform: translate(-50%, -50%);
+  bottom: 1px;
+  transform: translateX(-50%);
   width: 5px;
   height: 5px;
   border-radius: 50%;
@@ -1203,7 +1203,7 @@ textarea { resize: vertical; }
 .es-microchart-other { background: #9ca3af; }
 .es-microchart-dot-sm:hover,
 .es-microchart-other:hover {
-  transform: translate(-50%, -50%) scale(2);
+  transform: translateX(-50%) scale(2);
   box-shadow: 0 0 3px rgba(0,0,0,.3);
   z-index: 5;
 }
