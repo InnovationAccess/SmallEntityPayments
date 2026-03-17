@@ -1,3 +1,69 @@
+# HANDOFF — SmallEntityPayments Project Snapshot (2026-03-17, Session 3)
+
+---
+
+## What Changed Since Last Handoff (HANDOFF314.md → Session 3)
+
+This section covers commits on branch `claude/romantic-ramanujan` merged into main.
+
+### 1. Conveyance Normalization — Done in parallel session (4 commits on main)
+
+All 9.07M records in `pat_assign_records` now have 3 new columns:
+- `normalized_type` (STRING) — 14 fine-grained categories (employee 86.9%, divestiture 7.8%, etc.)
+- `review_flag` (BOOLEAN) — TRUE for 15,806 uncertain records
+- `employer_assignment` (BOOLEAN) — TRUE for employee assignments, FALSE for all others
+
+Files: `etl/normalize_conveyance.py` (one-time, already run), `utils/conveyance_classifier.py`, `etl/parse_assignments_xml_v4.py`, `etl/update_pipeline.py` (`resolve_assignment_pending()` post-load step), `database/setup_v4.sql`
+
+**normalized_type is NOT yet exposed in the frontend** — no UI changes yet.
+
+### 2. Assignment Popup: Names as Separate Lines (`f448bad`)
+
+Semicolon-separated assignor/assignee names in the assignment chain popup now display as one entity per line (using `<br>`) instead of a single semicolon-delimited string. Easier to read when 3+ parties are involved.
+
+File: `frontend/js/app.js` (v16)
+
+### 3. Boolean Query Builder CONTAINS Bug Fix (`62bfe2f`)
+
+**Root cause:** The CONTAINS operator with terms like `+ele* +tele*` generated `LIKE 'ele%' AND LIKE 'tele%'` — meaning "starts with ele AND starts with tele" simultaneously, which is impossible. Always returned 0 results.
+
+**Fix in `api/routers/query.py`:** Each term is now auto-wrapped with `%` on both sides when the CONTAINS operator is used, making them true substring searches (`LIKE '%ele%' AND LIKE '%tele%'`). User-placed wildcards are still respected.
+
+Also updated the placeholder text in `frontend/js/query_builder.js` (v9) to show cleaner examples without needing trailing `*`.
+
+### 4. Cache Version Fix (`query_builder.js`)
+
+`query_builder.js` version bumped to v9 in `index.html` (was missed in the prior deploy).
+
+---
+
+## Key Architecture Finding: Portfolio Query Has Redundant Source
+
+`get_applicant_portfolio()` in `api/routers/entity_status.py` assembles a patent portfolio from 4 UNION DISTINCT sources:
+
+1. `pfw_applicants` — all applicants on the application
+2. `pfw_inventors` — all inventors
+3. `pat_assign_assignees` (via `pat_assign_documents`) — entity received assignment
+4. `patent_file_wrapper_v2.first_applicant_name` — **NOW REDUNDANT**
+
+Source 4 was originally needed as a fallback for pre-2021 data before pfw_applicants was backfilled. That backfill is now **complete** — pfw_applicants covers back to mid-1990s (7.47M rows, min app: 08930379). Source 4 can be safely removed in the next cleanup pass.
+
+---
+
+## Open Issue: Portfolio KPIs Don't Filter for Current Ownership
+
+The Entity Status tab's payments and declarations reports show data for ALL patents the entity ever touched (filed, received, invented) — including patents that were subsequently divested. The `sold_count` field gives a rough count but doesn't exclude those patents from KPI calculations.
+
+**The right fix:** Use `normalized_type` to filter out patents where the entity appears as assignOR in a subsequent `divestiture` or `merger` record. This would give true "currently owned" portfolio stats. This work has NOT been started.
+
+---
+
+## Current Frontend Cache Versions
+
+styles.css?v=23, app.js?v=16, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8, citations.js?v=5, entity_status.js?v=19, prosecution.js?v=9, etl_log.js?v=3
+
+---
+
 # HANDOFF — SmallEntityPayments Project Snapshot (2026-03-12, Session 2)
 
 ## System Overview

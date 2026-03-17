@@ -58,6 +58,10 @@ class ApplicantRequest(BaseModel):
     limit: int = 50000
 
 
+class BulkTimelineRequest(BaseModel):
+    patent_numbers: List[str]
+
+
 # ── Endpoints ─────────────────────────────────────────────────────
 
 @router.get("/summary")
@@ -297,6 +301,128 @@ def search_conversions(req: ConversionSearchRequest) -> Dict[str, Any]:
     return {"total": len(results), "results": results, "expanded_names": expanded}
 
 
+@router.post("/bulk-timelines")
+def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
+    """Fetch event timelines for multiple patents (max 200).
+
+    Returns event_date + event_code per patent, grouped by patent_number.
+    Merges prosecution declarations (from pfw_transactions) + grant date
+    + post-grant events (from maintenance_fee_events_v2) into a single
+    chronologically-sorted timeline per patent.
+    """
+    if not req.patent_numbers:
+        return {"timelines": {}, "date_range": None}
+
+    pn_list = req.patent_numbers[:200]
+    params = [bigquery.ArrayQueryParameter("pn_list", "STRING", pn_list)]
+
+    # ── 1. Post-grant maintenance events ─────────────────────────
+    maint_sql = f"""
+    SELECT patent_number, event_date, event_code
+    FROM `{settings.maintenance_table}`
+    WHERE patent_number IN UNNEST(@pn_list)
+    ORDER BY patent_number, event_date ASC
+    """
+    maint_rows = bq_service.run_query(maint_sql, params)
+
+    # ── 2. Patent lookup: application_number + grant_date ────────
+    pfw_sql = f"""
+    SELECT patent_number, application_number, grant_date
+    FROM `{settings.patent_table}`
+    WHERE patent_number IN UNNEST(@pn_list)
+    """
+    pfw_rows = bq_service.run_query(pfw_sql, params)
+
+    # Map patent_number → application_number and grant_date
+    pn_to_app: Dict[str, str] = {}
+    pn_to_grant: Dict[str, Any] = {}
+    for r in pfw_rows:
+        pn = r["patent_number"]
+        if r.get("application_number"):
+            pn_to_app[pn] = r["application_number"]
+        if r.get("grant_date"):
+            pn_to_grant[pn] = r["grant_date"]
+
+    # ── 3. Prosecution declarations (SMAL, BIG., MICR from pfw_transactions)
+    app_nums = list(set(pn_to_app.values()))
+    pros_events: Dict[str, list] = {}  # app_num → list of (date, code)
+    if app_nums:
+        pros_params = [
+            bigquery.ArrayQueryParameter("an_list", "STRING", app_nums),
+        ]
+        pros_sql = f"""
+        SELECT application_number, event_date, event_code
+        FROM `{settings.pfw_transactions_table}`
+        WHERE application_number IN UNNEST(@an_list)
+          AND event_code IN ('SMAL', 'BIG.', 'MICR')
+        ORDER BY application_number, event_date ASC
+        """
+        pros_rows = bq_service.run_query(pros_sql, pros_params)
+        for r in pros_rows:
+            an = r["application_number"]
+            if an not in pros_events:
+                pros_events[an] = []
+            pros_events[an].append((r["event_date"], r["event_code"]))
+
+    # ── 4. Build unified timelines ───────────────────────────────
+    timelines: Dict[str, list] = {}
+    global_min = None
+    global_max = None
+
+    def _update_range(ed):
+        nonlocal global_min, global_max
+        if ed:
+            if global_min is None or ed < global_min:
+                global_min = ed
+            if global_max is None or ed > global_max:
+                global_max = ed
+
+    # 4a. Add prosecution declarations (keyed by app_num → patent_num)
+    app_to_pn: Dict[str, list] = {}
+    for pn, an in pn_to_app.items():
+        app_to_pn.setdefault(an, []).append(pn)
+
+    for an, evts in pros_events.items():
+        for pn in app_to_pn.get(an, []):
+            if pn not in timelines:
+                timelines[pn] = []
+            for (ed, ec) in evts:
+                date_str = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)
+                timelines[pn].append({"d": date_str, "c": ec})
+                _update_range(ed)
+
+    # 4b. Add grant date as synthetic GRNT event
+    for pn, gd in pn_to_grant.items():
+        if pn not in timelines:
+            timelines[pn] = []
+        date_str = gd.isoformat() if hasattr(gd, "isoformat") else str(gd)
+        timelines[pn].append({"d": date_str, "c": "GRNT"})
+        _update_range(gd)
+
+    # 4c. Add post-grant maintenance events
+    for r in maint_rows:
+        pn = r["patent_number"]
+        ed = r["event_date"]
+        ec = r["event_code"]
+        if pn not in timelines:
+            timelines[pn] = []
+        date_str = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)
+        timelines[pn].append({"d": date_str, "c": ec})
+        _update_range(ed)
+
+    # 4d. Sort each timeline chronologically
+    for pn in timelines:
+        timelines[pn].sort(key=lambda e: e["d"])
+
+    return {
+        "timelines": timelines,
+        "date_range": {
+            "min": _fmt_date(global_min),
+            "max": _fmt_date(global_max),
+        } if global_min and global_max else None,
+    }
+
+
 @router.post("/by-applicant")
 def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     """Full portfolio analysis for an entity — prosecution AND post-grant.
@@ -406,14 +532,14 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     first_status AS (
       SELECT
         patent_number,
-        ARRAY_AGG(derived_status ORDER BY event_date ASC LIMIT 1)[OFFSET(0)] AS first_status
+        ARRAY_AGG(derived_status IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_status
       FROM base
       GROUP BY patent_number
     )
     SELECT
       b.patent_number,
       f.first_status                                                          AS first_maint_status,
-      ARRAY_AGG(b.derived_status ORDER BY b.event_date DESC LIMIT 1)[OFFSET(0)] AS latest_maint_status,
+      ARRAY_AGG(b.derived_status IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
       COUNTIF(b.event_code = 'BIG.')  AS decl_big,
       COUNTIF(b.event_code = 'SMAL')  AS decl_smal,
       COUNTIF(b.event_code = 'MICR')  AS decl_micr,
@@ -490,6 +616,16 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     sold_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
     sold_rows = bq_service.run_query(sold_sql, sold_params)
     sold_count = sold_rows[0]["sold_count"] if sold_rows else 0
+
+    # Event code → pg_by_patent field name (for building per-patent mf_events)
+    _MF_CODE_MAP = [
+        ('M1551', 'pay_m1551'), ('M1552', 'pay_m1552'), ('M1553', 'pay_m1553'),
+        ('M2551', 'pay_m2551'), ('M2552', 'pay_m2552'), ('M2553', 'pay_m2553'),
+        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'),
+        ('BIG.', 'decl_big'), ('SMAL', 'decl_smal'), ('MICR', 'decl_micr'),
+        ('STOL', 'trans_stol'), ('LTOS', 'trans_ltos'),
+        ('STOM', 'trans_stom'), ('MTOS', 'trans_mtos'),
+    ]
 
     # ── Merge results ──────────────────────────────────────────────
     PROS_CODE_MAP = {"SMAL": "SMALL", "BIG.": "LARGE", "MICR": "MICRO"}
@@ -572,10 +708,11 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 pg_large += 1
             elif pg_first == "MICRO":
                 pg_micro += 1
-        pg_stol += pg.get("trans_stol", 0)
-        pg_ltos += pg.get("trans_ltos", 0)
-        pg_stom += pg.get("trans_stom", 0)
-        pg_mtos += pg.get("trans_mtos", 0)
+        # Count PATENTS with transitions (not total events)
+        pg_stol += 1 if pg.get("trans_stol", 0) > 0 else 0
+        pg_ltos += 1 if pg.get("trans_ltos", 0) > 0 else 0
+        pg_stom += 1 if pg.get("trans_stom", 0) > 0 else 0
+        pg_mtos += 1 if pg.get("trans_mtos", 0) > 0 else 0
         pg_declarations += (
             pg.get("decl_big", 0) + pg.get("decl_smal", 0) + pg.get("decl_micr", 0)
         )
@@ -606,6 +743,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             changed = True
             change_phase = "prosecution"
 
+        # Build mf_events: space-separated event codes present for this patent
+        mf_codes = [code for code, field in _MF_CODE_MAP if pg.get(field, 0) > 0]
+        mf_events = ' '.join(mf_codes)
+
         # Only add to detailed results up to display_limit
         if len(results) < display_limit:
             results.append({
@@ -615,11 +756,13 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 "filing_date": _fmt_date(r.get("filing_date")),
                 "grant_date": _fmt_date(r.get("grant_date")),
                 "prosecution_status": pros_status,
+                "prosecution_status_10y": pros_status_10y,
                 "post_grant_first": pg_first,
                 "post_grant_current": pg_latest or pg_first,
                 "status_changed": changed,
                 "change_date": _fmt_date(pg_change),
                 "change_phase": change_phase,
+                "mf_events": mf_events,
             })
 
     return {

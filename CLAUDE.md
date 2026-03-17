@@ -1,7 +1,7 @@
 # SmallEntityPayments — Project Instructions
 
 ## Quick Start
-- Read HANDOFF314.md for full project context, architecture, and current state
+- Read HANDOFF315.md for full project context, architecture, and current state
 - This project lives at: https://github.com/InnovationAccess/SmallEntityPayments
 - GCP Project: uspto-data-app
 - BigQuery Dataset: uspto_data (location: us-west1)
@@ -53,23 +53,32 @@
 - Cross-table joins use application_number as the universal key (not patent_number)
 
 ## Current State (2026-03-17)
-- All tables loaded: ~1.0 billion rows across 23 tables (~81.5 GB)
+- All tables loaded: ~1.0 billion rows across 24 tables
 - Patent assignments normalized into 4 tables (v4): pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents — linked by reel_frame, cross-table joins via application_number
 - Old patent_assignments_v2 and patent_assignments_v3 tables dropped
 - **Conveyance normalization complete**: All 9.07M assignment records classified into 14 fine-grained `normalized_type` categories (see Normalized Assignment Types below). The `employer_assignment` boolean is fully populated. 15,806 uncertain records flagged as `review` for human review.
+- **normalized_type is NOT yet exposed in the frontend** — no UI shows it yet
 - PASDL daily pipeline automatically normalizes new records: parser outputs `assignment_pending`, then `resolve_assignment_pending()` runs corporate filter + inventor matching post-load
 - 4 automated update pipelines running on Cloud Scheduler (PASDL uses v4 parser with normalized_type output)
-- 8 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status (+ Applicant Portfolio), Prosecution Fees, Update Log
-- 11 new pfw_* tables added (Part A expansion): pfw_applicants, pfw_inventors, pfw_child_continuity, pfw_foreign_priority, pfw_publications, pfw_patent_term_adjustment, pfw_pta_history, pfw_correspondence_address, pfw_attorneys, pfw_document_metadata, pfw_embedded_assignments
-- pfw_applicants and pfw_inventors fully loaded with 2001-2026 data (35.7M rows in pfw_inventors)
+- 8 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status (+ Applicant Portfolio), Prosecution Fees, Update Log, SEC Leads
+- 11 pfw_* tables: pfw_applicants (7.47M rows), pfw_inventors (35.7M rows), pfw_transactions, pfw_child_continuity, pfw_foreign_priority, pfw_publications, pfw_patent_term_adjustment, pfw_pta_history, pfw_correspondence_address, pfw_attorneys, pfw_document_metadata, pfw_embedded_assignments
+- **pfw_applicants and pfw_inventors are FULLY LOADED back to mid-1990s** (not just 2021+)
 - entity_names: 7.68M rows
 - All tables have sticky headers, sortable columns, column pickers, and assignment chain popup on patent numbers
-- Assignment popup is movable (drag header) and resizable (drag corner)
+- Assignment popup: movable (drag header), resizable (drag corner), fills right side of viewport, names show one per line
 - Citation tab includes examiner/applicant breakdown lists with name normalization
-- Entity Status tab derives status from event codes, supports boolean name search in applicant fields
+- Entity Status tab: micro chart timelines per patent, batched API calls (200/batch), single patent timeline view
 - Prosecution Fees tab has 3-phase workflow: entity discovery, application drill-down, invoice extraction via Gemini Vision
 - ETL pipeline logging writes to `etl_log` BigQuery table
-- cloudbuild-etl.yaml checked into repo root (was previously only at /tmp/)
+
+## Known Architecture Issue (open — next to fix)
+The `get_applicant_portfolio()` in `api/routers/entity_status.py` finds patents via 4 UNION DISTINCT sources:
+1. `pfw_applicants` — all applicants
+2. `pfw_inventors` — all inventors
+3. `pat_assign_assignees` — received as assignee
+4. `patent_file_wrapper_v2.first_applicant_name` — **REDUNDANT** (pfw_applicants now covers same data back to mid-1990s)
+
+**Critical**: The query finds all patents ever TOUCHED by the entity, not just currently OWNED. Patents sold/divested are still counted in KPIs. Fix: use `normalized_type` (divestiture/merger) to exclude patents where entity later appears as assignOR in an ownership-transfer record.
 
 ## Normalized Assignment Types
 The `pat_assign_records.normalized_type` column classifies each assignment into one of 14 categories:
@@ -122,8 +131,9 @@ The `pat_assign_records.normalized_type` column classifies each assignment into 
 - `/api/etl-log/*` — Pipeline monitoring (api/routers/etl_log.py)
 
 ## Frontend Cache-Busting Versions
-- styles.css?v=10, app.js?v=13, mdm.js?v=8, query_builder.js?v=8, ai_assistant.js?v=8
-- citations.js?v=5, entity_status.js?v=3, prosecution.js?v=3, etl_log.js?v=3
+- styles.css?v=23, app.js?v=16, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8
+- citations.js?v=5, entity_status.js?v=19, prosecution.js?v=9, etl_log.js?v=3
+- ALWAYS bump the ?v= number when changing any JS or CSS file — browsers aggressively cache these
 
 ## ETL Pipeline
 - Orchestrator: etl/update_pipeline.py (entrypoint for Cloud Run Jobs)

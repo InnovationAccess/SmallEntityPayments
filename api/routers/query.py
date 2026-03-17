@@ -210,10 +210,19 @@ def _build_sql(query: BooleanQuery) -> tuple[str, List[bigquery.ScalarQueryParam
             if and_terms or not_terms:
                 sub_clauses: List[str] = []
                 for j, term in enumerate(and_terms):
+                    # Ensure CONTAINS semantics: wrap with % if not already present
+                    if not term.startswith("%"):
+                        term = "%" + term
+                    if not term.endswith("%"):
+                        term = term + "%"
                     pn = f"p{i}_and{j}"
                     sub_clauses.append(f"LOWER({col_expr}) LIKE LOWER(@{pn})")
                     params.append(bigquery.ScalarQueryParameter(pn, "STRING", term))
                 for j, term in enumerate(not_terms):
+                    if not term.startswith("%"):
+                        term = "%" + term
+                    if not term.endswith("%"):
+                        term = term + "%"
                     pn = f"p{i}_not{j}"
                     sub_clauses.append(f"LOWER({col_expr}) NOT LIKE LOWER(@{pn})")
                     params.append(bigquery.ScalarQueryParameter(pn, "STRING", term))
