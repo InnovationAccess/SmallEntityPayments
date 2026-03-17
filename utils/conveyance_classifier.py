@@ -26,6 +26,7 @@ Normalized (fine-grained) categories:
     partial_release    — Subset of collateralized assets released
     merger             — Acquirer takes target's assets (actual ownership change)
     government         — Government interest / confirmatory license (Bayh-Dole)
+    court_order        — Court-ordered transfer (typically bankruptcy proceedings)
     assignment_pending — Text-level assignment; needs BQ inventor join to resolve
                          employee vs divestiture
 """
@@ -152,8 +153,8 @@ _NORMALIZED_PATTERNS: list[tuple[str, bool, re.Pattern]] = [
         r"employment agreement|employee agreement|employment contract",
         re.IGNORECASE)),
 
-    # Court order — ambiguous, flag for review
-    ("divestiture", True, re.compile(r"court order", re.IGNORECASE)),
+    # Court order — court-ordered transfers, typically bankruptcy
+    ("court_order", False, re.compile(r"court order", re.IGNORECASE)),
 ]
 
 # Catch-all assignment pattern (needs BQ inventor join to resolve)

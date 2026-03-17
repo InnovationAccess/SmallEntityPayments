@@ -203,11 +203,13 @@ WHERE normalized_type IS NULL
 def step_1_court_order(dry_run: bool = False):
     run_bq(f"""
 UPDATE `{DATASET}.pat_assign_records`
-SET normalized_type = 'divestiture',
-    review_flag = TRUE
+SET normalized_type = 'court_order'
 WHERE normalized_type IS NULL
-  AND UPPER(conveyance_text) LIKE '%COURT ORDER%'
-""", label="Step 1k: court order -> divestiture + review", dry_run=dry_run)
+  AND (
+    UPPER(conveyance_text) LIKE '%COURT ORDER%'
+    OR UPPER(conveyance_text) LIKE '%COURT ORDERED%'
+  )
+""", label="Step 1k: court_order", dry_run=dry_run)
 
 
 # ---------------------------------------------------------------------------
