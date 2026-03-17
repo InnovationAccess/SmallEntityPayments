@@ -1202,10 +1202,24 @@ textarea { resize: vertical; }
 }
 .es-microchart-other { background: #9ca3af; }
 .es-microchart-dot-sm:hover,
-.es-microchart-other:hover {
+.es-microchart-other:hover,
+.es-microchart-dot-trans:hover {
   transform: translateX(-50%) scale(2);
   box-shadow: 0 0 3px rgba(0,0,0,.3);
   z-index: 5;
+}
+
+/* Transition dots (STOL, LTOS, etc.) — slightly larger, on the status line */
+.es-microchart-dot-trans {
+  position: absolute;
+  bottom: 0px;
+  transform: translateX(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b7280;
+  z-index: 1;
+  cursor: default;
 }
 
 /* Micro chart color legend */
