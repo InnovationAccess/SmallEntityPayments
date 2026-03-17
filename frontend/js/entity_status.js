@@ -713,8 +713,8 @@ function filterPatentTable(filterSpec, label, clickedEl) {
 
   if (shownCount) shownCount.textContent = `${shown.toLocaleString()} of ${rows.length.toLocaleString()} shown`;
 
-  // Fetch and render micro charts for visible patents (max 200)
-  if (visiblePatents.length > 0 && visiblePatents.length <= 200) {
+  // Fetch and render micro charts for visible patents
+  if (visiblePatents.length > 0) {
     fetchAndRenderMicroCharts(visiblePatents, filterSpec);
   } else {
     clearMicroCharts();
@@ -756,6 +756,10 @@ function createIconEl(svgFn, color, leftPct, ev) {
 async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
   const tbl = document.getElementById('es-app-table');
   if (!tbl) return;
+
+  // Cap at 2000 patents for performance
+  const pats = patentNumbers.slice(0, 2000);
+
   tbl.querySelectorAll('tbody tr').forEach(row => {
     if (row.style.display !== 'none') {
       const cell = row.querySelector('.es-events-cell');
@@ -764,9 +768,28 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
   });
 
   try {
-    const data = await apiPost('/api/entity-status/bulk-timelines', {
-      patent_numbers: patentNumbers,
-    });
+    // Split into batches of 200 and fetch in parallel
+    const BATCH = 200;
+    const batches = [];
+    for (let i = 0; i < pats.length; i += BATCH) {
+      batches.push(pats.slice(i, i + BATCH));
+    }
+    const results = await Promise.all(
+      batches.map(batch => apiPost('/api/entity-status/bulk-timelines', { patent_numbers: batch }))
+    );
+
+    // Merge all batch responses into one unified result
+    const data = { timelines: {}, date_range: null };
+    for (const r of results) {
+      if (!r.date_range) continue;
+      Object.assign(data.timelines, r.timelines);
+      if (!data.date_range) {
+        data.date_range = { ...r.date_range };
+      } else {
+        if (r.date_range.min < data.date_range.min) data.date_range.min = r.date_range.min;
+        if (r.date_range.max > data.date_range.max) data.date_range.max = r.date_range.max;
+      }
+    }
 
     if (!data.date_range) { clearMicroCharts(); return; }
 
