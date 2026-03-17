@@ -939,8 +939,11 @@ textarea { resize: vertical; }
   vertical-align: middle;
   margin-left: .5rem;
 }
-.es-badge--changed { background: #fee2e2; color: #991b1b; }
-.es-badge--same    { background: #f3f4f6; color: #6b7280; }
+.es-badge--changed  { background: #fee2e2; color: #991b1b; }
+.es-badge--same     { background: #f3f4f6; color: #6b7280; }
+.es-badge--divested { background: #fef3c7; color: #92400e; }
+.es-badge--acquired { background: #dbeafe; color: #1e40af; }
+.es-badge--owned    { background: #dcfce7; color: #15803d; }
 
 /* Entity status pills (small / micro / large) */
 .es-status-badge {

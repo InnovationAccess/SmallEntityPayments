@@ -535,14 +535,23 @@ function renderApplicantPortfolio(data) {
           <span class="cite-stat-label">Pending Applications</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.sold_count.toLocaleString()}</span>
-          <span class="cite-stat-label">Assigned Away</span>
+          <span class="cite-stat-value">${(data.total_patents - (data.divested_count || 0)).toLocaleString()}</span>
+          <span class="cite-stat-label">Currently Owned</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(data.divested_count || 0, 'ownership:divested', 'Divested')}</span>
+          <span class="cite-stat-label">Divested</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(data.acquired_count || 0, 'ownership:acquired', 'Acquired via Assignment')}</span>
+          <span class="cite-stat-label">Acquired</span>
         </div>
         <div class="cite-stat">
           <span class="cite-stat-value">${data.total_applications.toLocaleString()}</span>
           <span class="cite-stat-label">Total Applications</span>
         </div>
       </div>
+      <p class="text-muted" style="margin:0.5rem 0 0;font-size:0.8rem">KPIs reflect only events during the entity's ownership period</p>
     </div>
 
     <!-- Prosecution Phase -->
@@ -685,6 +694,7 @@ function renderApplicantPortfolio(data) {
           <th data-sort-key="5">Post-Grant First</th>
           <th data-sort-key="6">Post-Grant Current</th>
           <th data-sort-key="7">Changed?</th>
+          <th data-sort-key="8">Ownership</th>
         </tr></thead>
         <tbody>
   `;
@@ -693,7 +703,17 @@ function renderApplicantPortfolio(data) {
     const changedMark = r.status_changed
       ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
       : '';
-    html += `<tr data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}">
+    // Ownership badge
+    let ownershipBadge;
+    if (r.divested) {
+      ownershipBadge = `<span class="es-badge es-badge--divested" title="Divested ${r.divested_date || ''}">Divested${r.divested_date ? ' ' + r.divested_date.slice(0, 10) : ''}</span>`;
+    } else if (r.acquired_via_assignment) {
+      ownershipBadge = `<span class="es-badge es-badge--acquired" title="Acquired via assignment ${r.acquired_date || ''}">Acquired${r.acquired_date ? ' ' + r.acquired_date.slice(0, 10) : ''}</span>`;
+    } else {
+      ownershipBadge = `<span class="es-badge es-badge--owned">Owned</span>`;
+    }
+    const rowStyle = r.divested ? ' style="opacity:0.6"' : '';
+    html += `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}">
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
       <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
@@ -702,6 +722,7 @@ function renderApplicantPortfolio(data) {
       <td>${statusBadge(r.post_grant_first)}</td>
       <td>${statusBadge(r.post_grant_current)}</td>
       <td>${changedMark}</td>
+      <td>${ownershipBadge}</td>
     </tr>`;
   }
 
@@ -769,6 +790,9 @@ function filterPatentTable(filterSpec, label, clickedEl) {
       match = codes.includes(row.dataset.pros);
     } else if (field === 'pros10y') {
       match = codes.includes(row.dataset.pros10y);
+    } else if (field === 'ownership') {
+      if (codes.includes('divested')) match = row.dataset.divested === '1';
+      else if (codes.includes('acquired')) match = row.dataset.acquired === '1';
     }
     row.style.display = match ? '' : 'none';
     if (match) {

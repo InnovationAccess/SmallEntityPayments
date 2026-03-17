@@ -464,9 +464,6 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
         WHERE a.assignee_name IN ({name_in})
           AND d.application_number IS NOT NULL
-        UNION DISTINCT
-        SELECT application_number FROM `{settings.patent_table}`
-        WHERE first_applicant_name IN ({name_in})
       )
     )
     SELECT
@@ -484,6 +481,8 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "expanded_names": expanded,
             "total_patents": 0,
             "total_applications": 0,
+            "divested_count": 0,
+            "acquired_count": 0,
             "sold_count": 0,
             "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0,
                            "small_10y": 0, "large_10y": 0, "micro_10y": 0, "total_10y": 0},
@@ -511,18 +510,61 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
 
     # ── Query 2: Post-grant events (maintenance_fee_events_v2) ─────
     # Payment codes derive entity status; also count declarations and transitions.
-    pg_params = [
-        bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums),
-    ]
+    # Filtered by ownership window: only events during the entity's ownership
+    # period are counted (after acquisition, before divestiture).
+    pg_params = list(params)  # include name params for ownership CTE
+    pg_params.append(bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums))
+    pg_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
     postgrant_sql = f"""
-    -- CTE avoids illegal aggregation-of-aggregation for change_date
-    WITH base AS (
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    ),
+    ownership AS (
+      SELECT pfw.patent_number, aa.acquired_date, dv.divested_date
+      FROM `{settings.patent_table}` pfw
+      LEFT JOIN acquired_via_assign aa ON aa.application_number = pfw.application_number
+      LEFT JOIN divested dv ON dv.application_number = pfw.application_number
+      WHERE pfw.patent_number IN UNNEST(@pn_list)
+    ),
+    base AS (
       SELECT
         m.patent_number,
         m.event_code,
         m.event_date,
-        {DERIVE_STATUS_SQL} AS derived_status
+        {DERIVE_STATUS_SQL} AS derived_status,
+        CASE WHEN m.event_date >= COALESCE(ow.acquired_date, DATE '0001-01-01')
+              AND m.event_date <  COALESCE(ow.divested_date, DATE '9999-12-31')
+             THEN TRUE ELSE FALSE END AS during_ownership
       FROM `{settings.maintenance_table}` m
+      LEFT JOIN ownership ow ON ow.patent_number = m.patent_number
       WHERE m.patent_number IN UNNEST(@pn_list)
         AND (
           {DERIVE_STATUS_SQL} IS NOT NULL
@@ -534,35 +576,37 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         patent_number,
         ARRAY_AGG(derived_status IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_status
       FROM base
+      WHERE during_ownership
       GROUP BY patent_number
     )
     SELECT
       b.patent_number,
-      f.first_status                                                          AS first_maint_status,
-      ARRAY_AGG(b.derived_status IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
-      COUNTIF(b.event_code = 'BIG.')  AS decl_big,
-      COUNTIF(b.event_code = 'SMAL')  AS decl_smal,
-      COUNTIF(b.event_code = 'MICR')  AS decl_micr,
-      COUNTIF(b.event_code = 'STOL')  AS trans_stol,
-      COUNTIF(b.event_code = 'LTOS')  AS trans_ltos,
-      COUNTIF(b.event_code = 'STOM')  AS trans_stom,
-      COUNTIF(b.event_code = 'MTOS')  AS trans_mtos,
-      -- Individual payment codes
-      COUNTIF(b.event_code = 'M1551') AS pay_m1551,
-      COUNTIF(b.event_code = 'M1552') AS pay_m1552,
-      COUNTIF(b.event_code = 'M1553') AS pay_m1553,
-      COUNTIF(b.event_code = 'M2551') AS pay_m2551,
-      COUNTIF(b.event_code = 'M2552') AS pay_m2552,
-      COUNTIF(b.event_code = 'M2553') AS pay_m2553,
-      COUNTIF(b.event_code = 'M3551') AS pay_m3551,
-      COUNTIF(b.event_code = 'M3552') AS pay_m3552,
-      COUNTIF(b.event_code = 'M3553') AS pay_m3553,
+      f.first_status AS first_maint_status,
+      ARRAY_AGG(CASE WHEN b.during_ownership THEN b.derived_status END
+        IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
+      COUNTIF(b.event_code = 'BIG.'  AND b.during_ownership) AS decl_big,
+      COUNTIF(b.event_code = 'SMAL'  AND b.during_ownership) AS decl_smal,
+      COUNTIF(b.event_code = 'MICR'  AND b.during_ownership) AS decl_micr,
+      COUNTIF(b.event_code = 'STOL'  AND b.during_ownership) AS trans_stol,
+      COUNTIF(b.event_code = 'LTOS'  AND b.during_ownership) AS trans_ltos,
+      COUNTIF(b.event_code = 'STOM'  AND b.during_ownership) AS trans_stom,
+      COUNTIF(b.event_code = 'MTOS'  AND b.during_ownership) AS trans_mtos,
+      COUNTIF(b.event_code = 'M1551' AND b.during_ownership) AS pay_m1551,
+      COUNTIF(b.event_code = 'M1552' AND b.during_ownership) AS pay_m1552,
+      COUNTIF(b.event_code = 'M1553' AND b.during_ownership) AS pay_m1553,
+      COUNTIF(b.event_code = 'M2551' AND b.during_ownership) AS pay_m2551,
+      COUNTIF(b.event_code = 'M2552' AND b.during_ownership) AS pay_m2552,
+      COUNTIF(b.event_code = 'M2553' AND b.during_ownership) AS pay_m2553,
+      COUNTIF(b.event_code = 'M3551' AND b.during_ownership) AS pay_m3551,
+      COUNTIF(b.event_code = 'M3552' AND b.during_ownership) AS pay_m3552,
+      COUNTIF(b.event_code = 'M3553' AND b.during_ownership) AS pay_m3553,
       MIN(CASE
-        WHEN b.derived_status IS NOT NULL AND b.derived_status != f.first_status
+        WHEN b.during_ownership AND b.derived_status IS NOT NULL
+        AND b.derived_status != f.first_status
         THEN b.event_date
       END) AS change_date
     FROM base b
-    JOIN first_status f ON f.patent_number = b.patent_number
+    LEFT JOIN first_status f ON f.patent_number = b.patent_number
     GROUP BY b.patent_number, f.first_status
     """ if pat_nums else None
 
@@ -574,48 +618,140 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
 
     # ── Query 3: Prosecution declarations (pfw_transactions) ───────
     # SMAL, BIG., MICR codes during prosecution phase.
-    pros_params = [
-        bigquery.ArrayQueryParameter("an_list", "STRING", app_nums),
-    ]
+    # Filtered by ownership window: only events during entity's ownership.
+    pros_params = list(params)  # include name params for ownership CTE
+    pros_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
     prosecution_sql = f"""
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    ),
+    owned_events AS (
+      SELECT
+        t.application_number,
+        t.event_code,
+        t.event_date,
+        CASE WHEN t.event_date >= COALESCE(aa.acquired_date, DATE '0001-01-01')
+              AND t.event_date <  COALESCE(dv.divested_date, DATE '9999-12-31')
+             THEN TRUE ELSE FALSE END AS during_ownership
+      FROM `{settings.pfw_transactions_table}` t
+      LEFT JOIN acquired_via_assign aa ON aa.application_number = t.application_number
+      LEFT JOIN divested dv ON dv.application_number = t.application_number
+      WHERE t.application_number IN UNNEST(@an_list)
+        AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
+    )
     SELECT
-      t.application_number,
-      ARRAY_AGG(t.event_code ORDER BY t.event_date ASC LIMIT 1)[OFFSET(0)]
+      application_number,
+      ARRAY_AGG(CASE WHEN during_ownership THEN event_code END
+        IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)]
         AS first_pros_status,
-      ARRAY_AGG(t.event_code ORDER BY t.event_date DESC LIMIT 1)[OFFSET(0)]
+      ARRAY_AGG(CASE WHEN during_ownership THEN event_code END
+        IGNORE NULLS ORDER BY event_date DESC LIMIT 1)[SAFE_OFFSET(0)]
         AS latest_pros_status,
-      COUNTIF(t.event_code = 'SMAL')  AS pros_smal,
-      COUNTIF(t.event_code = 'BIG.')  AS pros_big,
-      COUNTIF(t.event_code = 'MICR')  AS pros_micr,
-      -- 10-year filtered: latest status from events in the past 10 years
+      COUNTIF(event_code = 'SMAL' AND during_ownership) AS pros_smal,
+      COUNTIF(event_code = 'BIG.' AND during_ownership) AS pros_big,
+      COUNTIF(event_code = 'MICR' AND during_ownership) AS pros_micr,
       ARRAY_AGG(
-        CASE WHEN t.event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 YEAR)
-             THEN t.event_code END
-        IGNORE NULLS ORDER BY t.event_date DESC LIMIT 1
+        CASE WHEN during_ownership
+              AND event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 YEAR)
+             THEN event_code END
+        IGNORE NULLS ORDER BY event_date DESC LIMIT 1
       )[SAFE_OFFSET(0)] AS latest_pros_status_10y
-    FROM `{settings.pfw_transactions_table}` t
-    WHERE t.application_number IN UNNEST(@an_list)
-      AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
-    GROUP BY t.application_number
+    FROM owned_events
+    GROUP BY application_number
     """
     pros_by_app = {}
     pros_rows = bq_service.run_query(prosecution_sql, pros_params)
     for r in pros_rows:
         pros_by_app[r["application_number"]] = r
 
-    # ── Query 4: Sold count ────────────────────────────────────────
-    # Patents where the entity appears as assignOR (transferred away).
-    sold_params = list(params)  # reuse name params
-    sold_sql = f"""
-    SELECT COUNT(DISTINCT d.application_number) AS sold_count
-    FROM `{settings.assign_documents_table}` d
-    JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
-    WHERE d.application_number IN UNNEST(@an_list)
-      AND a.assignor_name IN ({name_in})
+    # ── Query 4: Ownership window per application ───────────────────
+    # Determines when the entity acquired and/or divested each patent.
+    # - acquired_date: non-NULL only for patents acquired via assignment
+    #   (not originally filed by the entity). NULL = applicant/inventor.
+    # - divested_date: non-NULL only for patents divested away via
+    #   divestiture, merger, or court_order.
+    ow_params = list(params)  # reuse name params
+    ow_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
+    ownership_sql = f"""
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    )
+    SELECT
+      aa.application_number, aa.acquired_date, CAST(NULL AS DATE) AS divested_date
+    FROM acquired_via_assign aa
+    WHERE aa.application_number NOT IN (SELECT application_number FROM divested)
+    UNION ALL
+    SELECT
+      dv.application_number, aa.acquired_date, dv.divested_date
+    FROM divested dv
+    LEFT JOIN acquired_via_assign aa ON aa.application_number = dv.application_number
     """
-    sold_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
-    sold_rows = bq_service.run_query(sold_sql, sold_params)
-    sold_count = sold_rows[0]["sold_count"] if sold_rows else 0
+    ow_rows = bq_service.run_query(ownership_sql, ow_params)
+    # ownership_map: app_num → (acquired_date_or_None, divested_date_or_None)
+    ownership_map: Dict[str, tuple] = {}
+    for r in ow_rows:
+        ownership_map[r["application_number"]] = (
+            r.get("acquired_date"),
+            r.get("divested_date"),
+        )
+    divested_count = sum(1 for _, (_, dv) in ownership_map.items() if dv is not None)
+    acquired_count = sum(1 for _, (ac, _) in ownership_map.items() if ac is not None)
 
     # Event code → pg_by_patent field name (for building per-patent mf_events)
     _MF_CODE_MAP = [
@@ -747,6 +883,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         mf_codes = [code for code, field in _MF_CODE_MAP if pg.get(field, 0) > 0]
         mf_events = ' '.join(mf_codes)
 
+        # Ownership window info for this patent
+        ow = ownership_map.get(app_num, (None, None))
+        acq_date, div_date = ow
+
         # Only add to detailed results up to display_limit
         if len(results) < display_limit:
             results.append({
@@ -763,6 +903,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 "change_date": _fmt_date(pg_change),
                 "change_phase": change_phase,
                 "mf_events": mf_events,
+                "acquired_via_assignment": acq_date is not None,
+                "acquired_date": _fmt_date(acq_date),
+                "divested": div_date is not None,
+                "divested_date": _fmt_date(div_date),
             })
 
     return {
@@ -770,7 +914,9 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         "expanded_names": expanded,
         "total_patents": total_patents,
         "total_applications": total_applications,
-        "sold_count": sold_count,
+        "divested_count": divested_count,
+        "acquired_count": acquired_count,
+        "sold_count": divested_count,  # backward compatibility alias
         "prosecution": {
             "small": pros_small,
             "large": pros_large,
