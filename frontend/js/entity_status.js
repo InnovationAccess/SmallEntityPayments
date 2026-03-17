@@ -170,28 +170,7 @@ function renderPatentTimeline(data) {
   `;
 
   if (data.timeline.length > 0) {
-    html += `
-      <div class="es-timeline">
-        <h4>Maintenance Fee Events</h4>
-        <div class="table-scroll-wrap">
-          <table class="data-table" id="es-timeline-table">
-            <thead><tr>
-              <th data-sort-key="0">Date</th>
-              <th data-sort-key="1">Event Code</th>
-              <th data-sort-key="2">Entity Status</th>
-            </tr></thead>
-            <tbody>
-    `;
-    for (const ev of data.timeline) {
-      const highlight = data.conversion_date && ev.event_date === data.conversion_date
-        ? ' class="es-highlight"' : '';
-      html += `<tr${highlight}>
-        <td>${escHtml(ev.event_date || '')}</td>
-        <td>${escHtml(ev.event_code || '')}</td>
-        <td>${statusBadge(ev.entity_status)}</td>
-      </tr>`;
-    }
-    html += '</tbody></table></div>';
+    html += '<div id="es-single-timeline-wrap" style="margin-top:1rem"></div>';
   } else {
     html += '<p class="text-muted">No maintenance fee events found.</p>';
   }
@@ -199,11 +178,126 @@ function renderPatentTimeline(data) {
   html += '</div>';
   patentArea.innerHTML = html;
 
-  const tbl = document.getElementById('es-timeline-table');
-  if (tbl) {
-    stampOriginalOrder(tbl);
-    enableTableSorting(tbl);
-    addColumnPicker(tbl);
+  // Render the full-width micro chart timeline
+  if (data.timeline.length > 0) {
+    const wrap = document.getElementById('es-single-timeline-wrap');
+    const events = data.timeline.map(ev => ({ d: ev.event_date, c: ev.event_code }));
+
+    // Add grant date as synthetic GRNT event if available
+    if (data.grant_date) {
+      events.push({ d: data.grant_date, c: 'GRNT' });
+      events.sort((a, b) => a.d.localeCompare(b.d));
+    }
+
+    const dates = events.map(e => new Date(e.d).getTime());
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    const totalMs = maxDate.getTime() - minDate.getTime();
+    if (totalMs <= 0) return;
+
+    const track = document.createElement('div');
+    track.className = 'es-microchart-track es-single-track';
+
+    // ── Build colored status line ──
+    const initColor = inferInitialColor(events);
+    let currentColor = initColor;
+    const changePoints = [];
+
+    let endPct = 100;
+    for (const ev of events) {
+      if (ev.c === 'EXP.') {
+        const expDate = new Date(ev.d);
+        endPct = clampPct(((expDate.getTime() - minDate.getTime()) / totalMs) * 100);
+        break;
+      }
+    }
+
+    for (const ev of events) {
+      const newColor = statusColorForEvent(ev.c);
+      if (newColor && newColor !== currentColor) {
+        const evDate = new Date(ev.d);
+        const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+        if (pct >= endPct) break;
+        changePoints.push({ pct, color: newColor });
+        currentColor = newColor;
+      }
+    }
+
+    let prevPct = 0;
+    let lineColor = initColor;
+    for (const cp of changePoints) {
+      appendLine(track, prevPct, cp.pct - prevPct, lineColor);
+      lineColor = cp.color;
+      prevPct = cp.pct;
+    }
+    appendLine(track, prevPct, endPct - prevPct, lineColor);
+
+    // ── Place icons with labels ──
+    for (const ev of events) {
+      const evDate = new Date(ev.d);
+      const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+      const cat = classifyEvent(ev.c);
+
+      let marker = null;
+      if (cat === 'large_payment') {
+        marker = createIconEl(svgBuilding, STATUS_COLORS.large, pct, ev);
+      } else if (cat === 'small_payment') {
+        marker = createIconEl(svgHouse, STATUS_COLORS.small, pct, ev);
+      } else if (cat === 'micro_payment') {
+        marker = createIconEl(svgPerson, STATUS_COLORS.micro, pct, ev);
+      } else if (cat === 'expired') {
+        marker = createIconEl(svgExpired, GRAY, pct, ev);
+      } else if (cat === 'grant') {
+        marker = document.createElement('div');
+        marker.className = 'es-microchart-dot-sm';
+        marker.style.left = pct + '%';
+        marker.style.backgroundColor = '#8b5cf6';
+        marker.title = `Grant \u2014 ${ev.d}`;
+      } else if (cat === 'reminder') {
+        marker = document.createElement('div');
+        marker.className = 'es-microchart-dot-sm';
+        marker.style.left = pct + '%';
+        marker.style.backgroundColor = '#eab308';
+        marker.title = `${ev.c} \u2014 ${ev.d}`;
+      } else if (cat === 'attorney') {
+        marker = document.createElement('div');
+        marker.className = 'es-microchart-dot-sm';
+        marker.style.left = pct + '%';
+        marker.style.backgroundColor = '#92400e';
+        marker.title = `${ev.c} \u2014 ${ev.d}`;
+      } else if (cat.startsWith('trans_to_')) {
+        marker = document.createElement('div');
+        marker.className = 'es-microchart-dot-trans';
+        marker.style.left = pct + '%';
+        marker.title = `${ev.c} \u2014 ${ev.d}`;
+      } else if (cat.startsWith('decl_')) {
+        continue;
+      } else {
+        marker = document.createElement('div');
+        marker.className = 'es-microchart-other';
+        marker.style.left = pct + '%';
+        marker.title = `${ev.c} \u2014 ${ev.d}`;
+      }
+
+      if (marker) {
+        // Add date label below the track for this larger view
+        const label = document.createElement('div');
+        label.className = 'es-single-label';
+        label.style.left = pct + '%';
+        label.textContent = ev.c;
+        track.appendChild(label);
+
+        track.appendChild(marker);
+      }
+    }
+
+    // ── Date axis: show min and max dates ──
+    const axisDiv = document.createElement('div');
+    axisDiv.className = 'es-single-axis';
+    axisDiv.innerHTML = `<span>${escHtml(minDate.toISOString().slice(0, 10))}</span><span>${escHtml(maxDate.toISOString().slice(0, 10))}</span>`;
+
+    wrap.appendChild(track);
+    wrap.appendChild(axisDiv);
   }
 }
 

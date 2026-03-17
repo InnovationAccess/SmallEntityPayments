@@ -1256,6 +1256,33 @@ textarea { resize: vertical; }
   flex-shrink: 0;
 }
 
+/* ----- Single Patent Timeline (large view) ----- */
+.es-single-track {
+  height: 50px;
+  margin-bottom: 1.5rem;
+}
+.es-single-track .es-microchart-line { height: 5px; bottom: 10px; }
+.es-single-track .es-microchart-icon { width: 22px; height: 22px; top: 20%; }
+.es-single-track .es-microchart-icon:hover { transform: translate(-50%, -50%) scale(1.5); }
+.es-single-track .es-microchart-dot-sm { bottom: 8px; width: 7px; height: 7px; }
+.es-single-track .es-microchart-dot-trans { bottom: 7px; width: 9px; height: 9px; }
+.es-single-track .es-microchart-other { bottom: 8px; width: 7px; height: 7px; }
+.es-single-label {
+  position: absolute;
+  bottom: -16px;
+  transform: translateX(-50%);
+  font-size: .65rem;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+.es-single-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: .7rem;
+  color: var(--color-muted);
+  margin-top: .25rem;
+}
+
 /* Name unification badge — shown next to normalized entity names */
 .es-unified-badge {
   display: inline-block;
