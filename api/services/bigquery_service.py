@@ -70,15 +70,36 @@ class BigQueryService:
         where_sql = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
         sql = f"""
+        WITH matched AS (
+          SELECT
+            en.entity_name,
+            en.frequency,
+            nu.representative_name
+          FROM `{settings.entity_names_table}` en
+          LEFT JOIN `{settings.unification_table}` nu
+            ON UPPER(nu.associated_name) = UPPER(en.entity_name)
+          {where_sql}
+        ),
+        -- For each representative found, get the TOTAL frequency across ALL its associated names
+        rep_totals AS (
+          SELECT
+            nu2.representative_name,
+            SUM(en2.frequency) AS total_freq
+          FROM `{settings.unification_table}` nu2
+          JOIN `{settings.entity_names_table}` en2
+            ON UPPER(en2.entity_name) = UPPER(nu2.associated_name)
+          WHERE nu2.representative_name IN (
+            SELECT representative_name FROM matched WHERE representative_name IS NOT NULL
+          )
+          GROUP BY nu2.representative_name
+        )
         SELECT
-          COALESCE(nu.representative_name, en.entity_name) AS raw_name,
-          SUM(en.frequency) AS frequency,
-          MAX(nu.representative_name) AS representative_name
-        FROM `{settings.entity_names_table}` en
-        LEFT JOIN `{settings.unification_table}` nu
-          ON UPPER(nu.associated_name) = UPPER(en.entity_name)
-        {where_sql}
-        GROUP BY COALESCE(nu.representative_name, en.entity_name)
+          COALESCE(m.representative_name, m.entity_name) AS raw_name,
+          COALESCE(rt.total_freq, SUM(m.frequency)) AS frequency,
+          MAX(m.representative_name) AS representative_name
+        FROM matched m
+        LEFT JOIN rep_totals rt ON rt.representative_name = m.representative_name
+        GROUP BY COALESCE(m.representative_name, m.entity_name), rt.total_freq
         ORDER BY frequency DESC
         LIMIT 1000
         """
