@@ -76,10 +76,22 @@ function statusColorForEvent(code) {
 /** Infer the initial line color from the first status-implying event. */
 function inferInitialColor(events) {
   for (const ev of events) {
+    // For transitions, the initial color is the "from" state
+    const from = transitionFromColor(ev.c);
+    if (from) return from;
     const c = statusColorForEvent(ev.c);
     if (c) return c;
   }
   return '#d1d5db'; // gray fallback
+}
+
+/** For transition events, return the implied PREVIOUS entity color. */
+function transitionFromColor(code) {
+  if (code === 'STOL') return STATUS_COLORS.small;  // was small → now large
+  if (code === 'LTOS') return STATUS_COLORS.large;  // was large → now small
+  if (code === 'MTOS') return STATUS_COLORS.micro;  // was micro → now small
+  if (code === 'STOM') return STATUS_COLORS.small;  // was small → now micro
+  return null;
 }
 
 // ── SVG Icon Factories (return HTML strings, use currentColor) ──
@@ -814,15 +826,45 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
         }
       }
 
+      // Find grant date position for transition "from" color insertion
+      let grantPct = null;
+      for (const ev of events) {
+        if (ev.c === 'GRNT') {
+          const gd = new Date(ev.d);
+          grantPct = clampPct(((gd.getTime() - minDate.getTime()) / totalMs) * 100);
+          break;
+        }
+      }
+
       for (const ev of events) {
         const newColor = statusColorForEvent(ev.c);
-        if (newColor && newColor !== currentColor) {
-          const evDate = new Date(ev.d);
-          const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
-          if (pct >= endPct) break; // don't add change points past expiration
-          changePoints.push({ pct, color: newColor });
-          currentColor = newColor;
+        if (!newColor || newColor === currentColor) continue;
+
+        const evDate = new Date(ev.d);
+        const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+        if (pct >= endPct) break; // don't add change points past expiration
+
+        // For transitions, ensure the implied "from" color is visible before
+        // the transition point (e.g., STOL implies small before → green segment)
+        const cat = classifyEvent(ev.c);
+        if (cat.startsWith('trans_to_')) {
+          const fromColor = transitionFromColor(ev.c);
+          if (fromColor && fromColor !== currentColor) {
+            // Insert "from" color at grant date, or slightly before transition
+            const lastPct = changePoints.length > 0
+              ? changePoints[changePoints.length - 1].pct : 0;
+            const insertPct = grantPct != null && grantPct > lastPct && grantPct < pct
+              ? grantPct
+              : Math.max(lastPct + 0.5, pct - 5);
+            if (insertPct < pct) {
+              changePoints.push({ pct: insertPct, color: fromColor });
+              currentColor = fromColor;
+            }
+          }
         }
+
+        changePoints.push({ pct, color: newColor });
+        currentColor = newColor;
       }
 
       // Draw line segments up to expiration point (or full width if no EXP.)
