@@ -7,7 +7,8 @@
  *   3. Applicant portfolio: entity status breakdown for one company's patents
  *
  * KPI numbers are clickable — clicking filters the Patent Details table to
- * show only patents associated with those events.
+ * show only patents associated with those events, and renders inline micro
+ * chart sparklines showing each patent's full event history.
  */
 
 import {
@@ -39,6 +40,31 @@ const appArea         = document.getElementById('es-app-results');
 const statusMsg       = document.getElementById('es-status');
 
 let summaryLoaded = false;
+
+// ── Micro Chart: Event Classification ────────────────────────────
+
+const EVENT_COLORS = {
+  large_payment: { color: '#ef4444', label: 'Large Payment' },
+  small_payment: { color: '#22c55e', label: 'Small Payment' },
+  micro_payment: { color: '#3b82f6', label: 'Micro Payment' },
+  decl_big:      { color: '#fca5a5', label: 'Decl: Large' },
+  decl_smal:     { color: '#86efac', label: 'Decl: Small' },
+  decl_micr:     { color: '#93c5fd', label: 'Decl: Micro' },
+  transition:    { color: '#f59e0b', label: 'Transition' },
+  other:         { color: '#9ca3af', label: 'Other' },
+};
+
+function classifyEvent(code) {
+  if (!code) return 'other';
+  if (code.startsWith('M1') || code.startsWith('F17')) return 'large_payment';
+  if (code.startsWith('M2') || code.startsWith('F27')) return 'small_payment';
+  if (code.startsWith('M3')) return 'micro_payment';
+  if (code === 'BIG.') return 'decl_big';
+  if (code === 'SMAL') return 'decl_smal';
+  if (code === 'MICR') return 'decl_micr';
+  if (['STOL', 'LTOS', 'STOM', 'MTOS'].includes(code)) return 'transition';
+  return 'other';
+}
 
 // ── Load summary on first tab view ───────────────────────────────
 
@@ -185,7 +211,6 @@ async function findNames(inputEl, suggestEl, findBtn) {
 
     suggestEl.querySelectorAll('.es-suggestion-item').forEach(item => {
       item.addEventListener('click', () => {
-        // Use the representative name if this name is normalized
         const rep = item.dataset.representative;
         inputEl.value = rep || item.dataset.name;
         suggestEl.classList.add('hidden');
@@ -498,6 +523,9 @@ function renderApplicantPortfolio(data) {
     <!-- Filter label (shown when a KPI is clicked) -->
     <div id="es-filter-label" class="es-filter-label hidden"></div>
 
+    <!-- Micro chart legend (shown when timelines are loaded) -->
+    <div id="es-microchart-legend" class="es-microchart-legend hidden"></div>
+
     <div class="results-header" style="margin-top:1rem">
       <strong>Patent Details</strong>
       <span id="es-shown-count" class="results-count">${data.results.length.toLocaleString()} shown</span>
@@ -508,7 +536,7 @@ function renderApplicantPortfolio(data) {
           <th data-sort-key="0">Patent #</th>
           <th data-sort-key="1">App #</th>
           <th data-sort-key="2">Grant Date</th>
-          <th data-sort-key="3">Title</th>
+          <th>Events</th>
           <th data-sort-key="4">Prosecution</th>
           <th data-sort-key="5">Post-Grant First</th>
           <th data-sort-key="6">Post-Grant Current</th>
@@ -521,11 +549,11 @@ function renderApplicantPortfolio(data) {
     const changedMark = r.status_changed
       ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
       : '';
-    html += `<tr data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}">
+    html += `<tr data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}">
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
       <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
-      <td>${escHtml(r.invention_title || '')}</td>
+      <td class="es-events-cell"></td>
       <td>${statusBadge(r.prosecution_status)}</td>
       <td>${statusBadge(r.post_grant_first)}</td>
       <td>${statusBadge(r.post_grant_current)}</td>
@@ -556,9 +584,7 @@ function renderApplicantPortfolio(data) {
 
 /**
  * Filter the Patent Details table based on a KPI click.
- * @param {string} filterSpec  - e.g. "mf:M2551" or "pros:SMALL,MICRO,LARGE"
- * @param {string} label       - human-readable label for the filter pill
- * @param {HTMLElement} clickedEl - the clicked KPI span
+ * Also fetches and renders micro chart sparklines for visible patents.
  */
 function filterPatentTable(filterSpec, label, clickedEl) {
   const tbl = document.getElementById('es-app-table');
@@ -575,6 +601,7 @@ function filterPatentTable(filterSpec, label, clickedEl) {
     rows.forEach(row => { row.style.display = ''; });
     if (filterLabel) filterLabel.classList.add('hidden');
     if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    clearMicroCharts();
     return;
   }
 
@@ -588,6 +615,7 @@ function filterPatentTable(filterSpec, label, clickedEl) {
   const codes = filterSpec.slice(colonIdx + 1).split(',');
 
   let shown = 0;
+  const visiblePatents = [];
   rows.forEach(row => {
     let match = false;
     if (field === 'mf') {
@@ -599,7 +627,11 @@ function filterPatentTable(filterSpec, label, clickedEl) {
       match = codes.includes(row.dataset.pros10y);
     }
     row.style.display = match ? '' : 'none';
-    if (match) shown++;
+    if (match) {
+      shown++;
+      const pn = row.dataset.pn;
+      if (pn) visiblePatents.push(pn);
+    }
   });
 
   // Update filter label pill
@@ -611,10 +643,139 @@ function filterPatentTable(filterSpec, label, clickedEl) {
       rows.forEach(row => { row.style.display = ''; });
       filterLabel.classList.add('hidden');
       if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+      clearMicroCharts();
     });
   }
 
   if (shownCount) shownCount.textContent = `${shown.toLocaleString()} of ${rows.length.toLocaleString()} shown`;
+
+  // Fetch and render micro charts for visible patents (max 200)
+  if (visiblePatents.length > 0 && visiblePatents.length <= 200) {
+    fetchAndRenderMicroCharts(visiblePatents, filterSpec);
+  } else {
+    clearMicroCharts();
+  }
+}
+
+// ── Micro Chart Rendering ────────────────────────────────────────
+
+/**
+ * Fetch bulk timelines and render sparklines in the Events column.
+ */
+async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
+  // Show loading state in cells
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+  tbl.querySelectorAll('tbody tr').forEach(row => {
+    if (row.style.display !== 'none') {
+      const cell = row.querySelector('.es-events-cell');
+      if (cell) cell.innerHTML = '<span class="text-muted" style="font-size:0.7rem">Loading...</span>';
+    }
+  });
+
+  try {
+    const data = await apiPost('/api/entity-status/bulk-timelines', {
+      patent_numbers: patentNumbers,
+    });
+
+    if (!data.date_range) {
+      clearMicroCharts();
+      return;
+    }
+
+    const minDate = new Date(data.date_range.min);
+    const maxDate = new Date(data.date_range.max);
+    const totalMs = maxDate.getTime() - minDate.getTime();
+    if (totalMs <= 0) { clearMicroCharts(); return; }
+
+    // Parse highlight codes from filter spec
+    const highlightCodes = new Set();
+    if (filterSpec) {
+      const ci = filterSpec.indexOf(':');
+      if (ci >= 0) filterSpec.slice(ci + 1).split(',').forEach(c => highlightCodes.add(c));
+    }
+
+    // Render sparkline into each visible row's Events cell
+    tbl.querySelectorAll('tbody tr').forEach(row => {
+      if (row.style.display === 'none') return;
+      const pn = row.dataset.pn;
+      const cell = row.querySelector('.es-events-cell');
+      if (!cell || !pn) return;
+
+      const events = data.timelines[pn] || [];
+      if (events.length === 0) {
+        cell.innerHTML = '<span class="text-muted" style="font-size:0.7rem">&mdash;</span>';
+        return;
+      }
+
+      cell.innerHTML = '';
+      const track = document.createElement('div');
+      track.className = 'es-microchart-track';
+
+      for (const ev of events) {
+        const evDate = new Date(ev.d);
+        const pct = ((evDate.getTime() - minDate.getTime()) / totalMs) * 100;
+        const cls = classifyEvent(ev.c);
+        const colorInfo = EVENT_COLORS[cls];
+
+        const dot = document.createElement('div');
+        dot.className = 'es-microchart-dot';
+        dot.style.left = `${Math.max(0, Math.min(100, pct))}%`;
+        dot.style.backgroundColor = colorInfo.color;
+        dot.title = `${ev.c} \u2014 ${ev.d}`;
+
+        if (highlightCodes.has(ev.c)) {
+          dot.classList.add('es-microchart-dot--hl');
+        }
+
+        track.appendChild(dot);
+      }
+
+      cell.appendChild(track);
+    });
+
+    // Show legend
+    showMicroChartLegend();
+
+  } catch (err) {
+    // Silently clear on error — the table is still functional
+    clearMicroCharts();
+  }
+}
+
+/** Clear all micro chart sparklines from the Events column. */
+function clearMicroCharts() {
+  const tbl = document.getElementById('es-app-table');
+  if (tbl) {
+    tbl.querySelectorAll('.es-events-cell').forEach(cell => { cell.innerHTML = ''; });
+  }
+  const legend = document.getElementById('es-microchart-legend');
+  if (legend) legend.classList.add('hidden');
+}
+
+/** Show the color legend above the table. */
+function showMicroChartLegend() {
+  const legend = document.getElementById('es-microchart-legend');
+  if (!legend) return;
+
+  legend.innerHTML = '';
+  const categories = [
+    ['large_payment', 'Large Pay'],
+    ['small_payment', 'Small Pay'],
+    ['micro_payment', 'Micro Pay'],
+    ['decl_big', 'Decl: Large'],
+    ['decl_smal', 'Decl: Small'],
+    ['decl_micr', 'Decl: Micro'],
+    ['transition', 'Transition'],
+    ['other', 'Other'],
+  ];
+  for (const [key, label] of categories) {
+    const item = document.createElement('span');
+    item.className = 'es-microchart-legend-item';
+    item.innerHTML = `<span class="es-microchart-legend-swatch" style="background:${EVENT_COLORS[key].color}"></span>${escHtml(label)}`;
+    legend.appendChild(item);
+  }
+  legend.classList.remove('hidden');
 }
 
 // ── Summary Dashboard ────────────────────────────────────────────

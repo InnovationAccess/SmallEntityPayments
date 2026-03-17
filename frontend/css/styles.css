@@ -1136,6 +1136,74 @@ textarea { resize: vertical; }
   color: #4338ca;
 }
 
+/* ----- Micro chart sparkline timelines ----- */
+.es-events-cell {
+  min-width: 180px;
+  padding: 2px 4px !important;
+  vertical-align: middle !important;
+}
+.es-microchart-track {
+  position: relative;
+  height: 20px;
+  background: #f1f3f5;
+  border-radius: 3px;
+  overflow: visible;
+}
+.es-microchart-dot {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  cursor: default;
+  transition: transform .15s;
+  z-index: 1;
+}
+.es-microchart-dot:hover {
+  transform: translate(-50%, -50%) scale(2);
+  box-shadow: 0 0 4px rgba(0,0,0,.3);
+  z-index: 5;
+}
+.es-microchart-dot--hl {
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor;
+  z-index: 3;
+}
+.es-microchart-dot--hl:hover {
+  transform: translate(-50%, -50%) scale(2);
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor, 0 0 6px rgba(0,0,0,.3);
+  z-index: 5;
+}
+
+/* Micro chart color legend */
+.es-microchart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem 1.2rem;
+  padding: .5rem .75rem;
+  background: #f9fafb;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: .78rem;
+  color: var(--color-muted);
+  margin-top: .5rem;
+}
+.es-microchart-legend.hidden { display: none !important; }
+.es-microchart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+}
+.es-microchart-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 /* Name unification badge — shown next to normalized entity names */
 .es-unified-badge {
   display: inline-block;

@@ -58,6 +58,10 @@ class ApplicantRequest(BaseModel):
     limit: int = 50000
 
 
+class BulkTimelineRequest(BaseModel):
+    patent_numbers: List[str]
+
+
 # ── Endpoints ─────────────────────────────────────────────────────
 
 @router.get("/summary")
@@ -295,6 +299,54 @@ def search_conversions(req: ConversionSearchRequest) -> Dict[str, Any]:
         })
 
     return {"total": len(results), "results": results, "expanded_names": expanded}
+
+
+@router.post("/bulk-timelines")
+def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
+    """Fetch event timelines for multiple patents (max 200).
+
+    Returns event_date + event_code per patent, grouped by patent_number.
+    Used by the frontend micro chart visualization.
+    """
+    if not req.patent_numbers:
+        return {"timelines": {}, "date_range": None}
+
+    pn_list = req.patent_numbers[:200]
+    params = [bigquery.ArrayQueryParameter("pn_list", "STRING", pn_list)]
+
+    sql = f"""
+    SELECT patent_number, event_date, event_code
+    FROM `{settings.maintenance_table}`
+    WHERE patent_number IN UNNEST(@pn_list)
+    ORDER BY patent_number, event_date ASC
+    """
+    rows = bq_service.run_query(sql, params)
+
+    timelines: Dict[str, list] = {}
+    global_min = None
+    global_max = None
+
+    for r in rows:
+        pn = r["patent_number"]
+        ed = r["event_date"]
+        ec = r["event_code"]
+        if pn not in timelines:
+            timelines[pn] = []
+        date_str = ed.isoformat() if hasattr(ed, "isoformat") else str(ed)
+        timelines[pn].append({"d": date_str, "c": ec})
+        if ed:
+            if global_min is None or ed < global_min:
+                global_min = ed
+            if global_max is None or ed > global_max:
+                global_max = ed
+
+    return {
+        "timelines": timelines,
+        "date_range": {
+            "min": _fmt_date(global_min),
+            "max": _fmt_date(global_max),
+        } if global_min and global_max else None,
+    }
 
 
 @router.post("/by-applicant")
