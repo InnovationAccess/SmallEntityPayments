@@ -41,18 +41,10 @@ const statusMsg       = document.getElementById('es-status');
 
 let summaryLoaded = false;
 
-// ── Micro Chart: Event Classification ────────────────────────────
+// ── Micro Chart: Event Classification & Icons ───────────────────
 
-const EVENT_COLORS = {
-  large_payment: { color: '#ef4444', label: 'Large Payment' },
-  small_payment: { color: '#22c55e', label: 'Small Payment' },
-  micro_payment: { color: '#3b82f6', label: 'Micro Payment' },
-  decl_big:      { color: '#fca5a5', label: 'Decl: Large' },
-  decl_smal:     { color: '#86efac', label: 'Decl: Small' },
-  decl_micr:     { color: '#93c5fd', label: 'Decl: Micro' },
-  transition:    { color: '#f59e0b', label: 'Transition' },
-  other:         { color: '#9ca3af', label: 'Other' },
-};
+const STATUS_COLORS = { large: '#ef4444', small: '#22c55e', micro: '#3b82f6' };
+const GRAY = '#6b7280';
 
 function classifyEvent(code) {
   if (!code) return 'other';
@@ -62,8 +54,79 @@ function classifyEvent(code) {
   if (code === 'BIG.') return 'decl_big';
   if (code === 'SMAL') return 'decl_smal';
   if (code === 'MICR') return 'decl_micr';
-  if (['STOL', 'LTOS', 'STOM', 'MTOS'].includes(code)) return 'transition';
+  if (code === 'STOL') return 'trans_to_large';
+  if (code === 'LTOS' || code === 'MTOS') return 'trans_to_small';
+  if (code === 'STOM') return 'trans_to_micro';
+  if (code === 'EXP.') return 'expired';
+  if (code.startsWith('REM')) return 'reminder';
+  if (code === 'ASPN') return 'attorney';
   return 'other';
+}
+
+/** Returns the entity-status color implied by an event, or null. */
+function statusColorForEvent(code) {
+  const cat = classifyEvent(code);
+  if (cat === 'large_payment' || cat === 'decl_big' || cat === 'trans_to_large') return STATUS_COLORS.large;
+  if (cat === 'small_payment' || cat === 'decl_smal' || cat === 'trans_to_small') return STATUS_COLORS.small;
+  if (cat === 'micro_payment' || cat === 'decl_micr' || cat === 'trans_to_micro') return STATUS_COLORS.micro;
+  return null;
+}
+
+/** Infer the initial line color from the first status-implying event. */
+function inferInitialColor(events) {
+  for (const ev of events) {
+    const c = statusColorForEvent(ev.c);
+    if (c) return c;
+  }
+  return '#d1d5db'; // gray fallback
+}
+
+// ── SVG Icon Factories (return HTML strings, use currentColor) ──
+
+function svgBuilding() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<rect x="2" y="2" width="10" height="12" rx="1"/>'
+    + '<rect x="4" y="4" width="2" height="2" rx=".3" fill="white"/>'
+    + '<rect x="8" y="4" width="2" height="2" rx=".3" fill="white"/>'
+    + '<rect x="4" y="8" width="2" height="2" rx=".3" fill="white"/>'
+    + '<rect x="8" y="8" width="2" height="2" rx=".3" fill="white"/>'
+    + '</svg>';
+}
+
+function svgHouse() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<polygon points="7,1 1,7 3,7 3,13 11,13 11,7 13,7"/>'
+    + '<rect x="5.5" y="9" width="3" height="4" rx=".3" fill="white"/>'
+    + '</svg>';
+}
+
+function svgPerson() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<circle cx="7" cy="4" r="2.5"/>'
+    + '<path d="M3,14 L3,10.5 A4,3.5 0 0 1 11,10.5 L11,14"/>'
+    + '</svg>';
+}
+
+function svgExpired() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">'
+    + '<path d="M3,3 L11,11 M11,3 L3,11"/>'
+    + '</svg>';
+}
+
+function svgAlarm() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">'
+    + '<circle cx="7" cy="7.5" r="4.5"/>'
+    + '<path d="M7,5 L7,7.5 L9,8.5"/>'
+    + '<path d="M4,1.5 L2,3.5"/><path d="M10,1.5 L12,3.5"/>'
+    + '</svg>';
+}
+
+function svgBriefcase() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<rect x="1" y="5" width="12" height="8" rx="1.5"/>'
+    + '<path d="M5,5 L5,3.5 A1.5,1.5 0 0 1 9,3.5 L9,5" fill="none" stroke="currentColor" stroke-width="1.5"/>'
+    + '<line x1="1" y1="9" x2="13" y2="9" stroke="white" stroke-width="1"/>'
+    + '</svg>';
 }
 
 // ── Load summary on first tab view ───────────────────────────────
@@ -659,11 +722,37 @@ function filterPatentTable(filterSpec, label, clickedEl) {
 
 // ── Micro Chart Rendering ────────────────────────────────────────
 
+function clampPct(pct) { return Math.max(0, Math.min(100, pct)); }
+
+/** Create a colored line segment div in the track. */
+function appendLine(track, leftPct, widthPct, color) {
+  if (widthPct <= 0) return;
+  const seg = document.createElement('div');
+  seg.className = 'es-microchart-line';
+  seg.style.left = leftPct + '%';
+  seg.style.width = widthPct + '%';
+  seg.style.backgroundColor = color;
+  track.appendChild(seg);
+}
+
+/** Create an absolutely-positioned icon wrapper with an SVG inside. */
+function createIconEl(svgFn, color, leftPct, ev) {
+  const wrap = document.createElement('div');
+  wrap.className = 'es-microchart-icon';
+  wrap.style.left = leftPct + '%';
+  wrap.style.color = color;
+  wrap.title = `${ev.c} \u2014 ${ev.d}`;
+  wrap.innerHTML = svgFn();
+  return wrap;
+}
+
 /**
  * Fetch bulk timelines and render sparklines in the Events column.
+ * Each sparkline has a colored status line (red/green/blue = large/small/micro)
+ * that changes color at declaration/transition events, with icons for payments
+ * and status events positioned on top.
  */
 async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
-  // Show loading state in cells
   const tbl = document.getElementById('es-app-table');
   if (!tbl) return;
   tbl.querySelectorAll('tbody tr').forEach(row => {
@@ -678,10 +767,7 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       patent_numbers: patentNumbers,
     });
 
-    if (!data.date_range) {
-      clearMicroCharts();
-      return;
-    }
+    if (!data.date_range) { clearMicroCharts(); return; }
 
     const minDate = new Date(data.date_range.min);
     const maxDate = new Date(data.date_range.max);
@@ -712,33 +798,73 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       const track = document.createElement('div');
       track.className = 'es-microchart-track';
 
+      // ── Build colored status line ──
+      const initColor = inferInitialColor(events);
+      let currentColor = initColor;
+      const changePoints = [];
+
+      for (const ev of events) {
+        const newColor = statusColorForEvent(ev.c);
+        if (newColor && newColor !== currentColor) {
+          const evDate = new Date(ev.d);
+          const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+          changePoints.push({ pct, color: newColor });
+          currentColor = newColor;
+        }
+      }
+
+      // Draw line segments across full track width
+      let prevPct = 0;
+      let lineColor = initColor;
+      for (const cp of changePoints) {
+        appendLine(track, prevPct, cp.pct - prevPct, lineColor);
+        lineColor = cp.color;
+        prevPct = cp.pct;
+      }
+      appendLine(track, prevPct, 100 - prevPct, lineColor);
+
+      // ── Place icons on top of the line ──
       for (const ev of events) {
         const evDate = new Date(ev.d);
-        const pct = ((evDate.getTime() - minDate.getTime()) / totalMs) * 100;
-        const cls = classifyEvent(ev.c);
-        const colorInfo = EVENT_COLORS[cls];
+        const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
+        const cat = classifyEvent(ev.c);
 
-        const dot = document.createElement('div');
-        dot.className = 'es-microchart-dot';
-        dot.style.left = `${Math.max(0, Math.min(100, pct))}%`;
-        dot.style.backgroundColor = colorInfo.color;
-        dot.title = `${ev.c} \u2014 ${ev.d}`;
-
-        if (highlightCodes.has(ev.c)) {
-          dot.classList.add('es-microchart-dot--hl');
+        let marker = null;
+        if (cat === 'large_payment') {
+          marker = createIconEl(svgBuilding, STATUS_COLORS.large, pct, ev);
+        } else if (cat === 'small_payment') {
+          marker = createIconEl(svgHouse, STATUS_COLORS.small, pct, ev);
+        } else if (cat === 'micro_payment') {
+          marker = createIconEl(svgPerson, STATUS_COLORS.micro, pct, ev);
+        } else if (cat === 'expired') {
+          marker = createIconEl(svgExpired, GRAY, pct, ev);
+        } else if (cat === 'reminder') {
+          marker = createIconEl(svgAlarm, GRAY, pct, ev);
+        } else if (cat === 'attorney') {
+          marker = createIconEl(svgBriefcase, GRAY, pct, ev);
+        } else if (cat.startsWith('decl_') || cat.startsWith('trans_')) {
+          // Declarations & transitions are shown by the line color change — no marker
+          continue;
+        } else {
+          // Catch-all: small gray dot
+          marker = document.createElement('div');
+          marker.className = 'es-microchart-other';
+          marker.style.left = pct + '%';
+          marker.title = `${ev.c} \u2014 ${ev.d}`;
         }
 
-        track.appendChild(dot);
+        if (marker && highlightCodes.has(ev.c)) {
+          marker.classList.add('es-microchart-icon--hl');
+        }
+        if (marker) track.appendChild(marker);
       }
 
       cell.appendChild(track);
     });
 
-    // Show legend
     showMicroChartLegend();
 
   } catch (err) {
-    // Silently clear on error — the table is still functional
     clearMicroCharts();
   }
 }
@@ -753,28 +879,51 @@ function clearMicroCharts() {
   if (legend) legend.classList.add('hidden');
 }
 
-/** Show the color legend above the table. */
+/** Show the icon + line color legend above the table. */
 function showMicroChartLegend() {
   const legend = document.getElementById('es-microchart-legend');
   if (!legend) return;
-
   legend.innerHTML = '';
-  const categories = [
-    ['large_payment', 'Large Pay'],
-    ['small_payment', 'Small Pay'],
-    ['micro_payment', 'Micro Pay'],
-    ['decl_big', 'Decl: Large'],
-    ['decl_smal', 'Decl: Small'],
-    ['decl_micr', 'Decl: Micro'],
-    ['transition', 'Transition'],
-    ['other', 'Other'],
+
+  // Payment icons
+  const iconEntries = [
+    [svgBuilding, STATUS_COLORS.large, 'Large Pay'],
+    [svgHouse,    STATUS_COLORS.small, 'Small Pay'],
+    [svgPerson,   STATUS_COLORS.micro, 'Micro Pay'],
   ];
-  for (const [key, label] of categories) {
+  for (const [fn, color, label] of iconEntries) {
     const item = document.createElement('span');
     item.className = 'es-microchart-legend-item';
-    item.innerHTML = `<span class="es-microchart-legend-swatch" style="background:${EVENT_COLORS[key].color}"></span>${escHtml(label)}`;
+    item.innerHTML = `<span class="es-microchart-legend-icon" style="color:${color}">${fn()}</span>${escHtml(label)}`;
     legend.appendChild(item);
   }
+
+  // Status line swatches
+  const lineEntries = [
+    [STATUS_COLORS.large, 'Large Status'],
+    [STATUS_COLORS.small, 'Small Status'],
+    [STATUS_COLORS.micro, 'Micro Status'],
+  ];
+  for (const [color, label] of lineEntries) {
+    const item = document.createElement('span');
+    item.className = 'es-microchart-legend-item';
+    item.innerHTML = `<span class="es-microchart-legend-line" style="background:${color}"></span>${escHtml(label)}`;
+    legend.appendChild(item);
+  }
+
+  // Event icons (gray)
+  const eventEntries = [
+    [svgExpired,   GRAY, 'Expired'],
+    [svgAlarm,     GRAY, 'Reminder'],
+    [svgBriefcase, GRAY, 'Attorney'],
+  ];
+  for (const [fn, color, label] of eventEntries) {
+    const item = document.createElement('span');
+    item.className = 'es-microchart-legend-item';
+    item.innerHTML = `<span class="es-microchart-legend-icon" style="color:${color}">${fn()}</span>${escHtml(label)}`;
+    legend.appendChild(item);
+  }
+
   legend.classList.remove('hidden');
 }
 

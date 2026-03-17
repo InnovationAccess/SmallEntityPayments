@@ -1138,42 +1138,72 @@ textarea { resize: vertical; }
 
 /* ----- Micro chart sparkline timelines ----- */
 .es-events-cell {
-  min-width: 180px;
+  min-width: 200px;
   padding: 2px 4px !important;
   vertical-align: middle !important;
 }
 .es-microchart-track {
   position: relative;
-  height: 20px;
+  height: 22px;
   background: #f1f3f5;
   border-radius: 3px;
   overflow: visible;
 }
-.es-microchart-dot {
+
+/* Colored status line segments */
+.es-microchart-line {
+  position: absolute;
+  height: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 1px;
+  z-index: 0;
+}
+
+/* SVG icon markers (payments + status events) */
+.es-microchart-icon {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  z-index: 2;
   cursor: default;
-  transition: transform .15s;
-  z-index: 1;
+  transition: transform .15s, filter .15s;
 }
-.es-microchart-dot:hover {
-  transform: translate(-50%, -50%) scale(2);
-  box-shadow: 0 0 4px rgba(0,0,0,.3);
+.es-microchart-icon:hover {
+  transform: translate(-50%, -50%) scale(1.8);
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.3));
   z-index: 5;
 }
-.es-microchart-dot--hl {
-  width: 9px;
-  height: 9px;
-  box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor;
+
+/* Highlighted icons — active KPI filter match (no rings, just larger + shadow) */
+.es-microchart-icon--hl {
+  transform: translate(-50%, -50%) scale(1.3);
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.4));
   z-index: 3;
 }
-.es-microchart-dot--hl:hover {
+.es-microchart-icon--hl:hover {
+  transform: translate(-50%, -50%) scale(1.8);
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.5));
+  z-index: 5;
+}
+
+/* Catch-all small gray dot for unrecognised event codes */
+.es-microchart-other {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #9ca3af;
+  z-index: 1;
+  cursor: default;
+}
+.es-microchart-other:hover {
   transform: translate(-50%, -50%) scale(2);
-  box-shadow: 0 0 0 2px #fff, 0 0 0 3px currentColor, 0 0 6px rgba(0,0,0,.3);
+  box-shadow: 0 0 3px rgba(0,0,0,.3);
   z-index: 5;
 }
 
@@ -1196,11 +1226,18 @@ textarea { resize: vertical; }
   align-items: center;
   gap: .3rem;
 }
-.es-microchart-legend-swatch {
+.es-microchart-legend-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.es-microchart-legend-line {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 20px;
+  height: 3px;
+  border-radius: 1px;
+  vertical-align: middle;
   flex-shrink: 0;
 }
 
