@@ -88,6 +88,7 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
       ao.assignors,
       ar.conveyance_text,
       ae.assignees,
+      ar.normalized_type,
       ar.reel_frame,
       ar.recorded_date
     FROM matching_docs md
@@ -112,6 +113,7 @@ def get_assignment_chain(patent_number: str) -> Dict[str, Any]:
             "assignor": r.get("assignors") or "",
             "conveyance": r.get("conveyance_text") or "",
             "assignee": r.get("assignees") or "",
+            "normalized_type": r.get("normalized_type") or "",
             "reel_frame": r.get("reel_frame") or "",
         })
 
