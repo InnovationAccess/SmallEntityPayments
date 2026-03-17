@@ -33,13 +33,10 @@ const convApplicantFind = document.getElementById('es-applicant-find');
 const convApplicantSugg = document.getElementById('es-applicant-suggestions');
 const appFindBtn      = document.getElementById('es-app-find');
 const appSuggestions   = document.getElementById('es-app-suggestions');
-const summaryArea     = document.getElementById('es-summary');
 const patentArea      = document.getElementById('es-patent-results');
 const convArea        = document.getElementById('es-conv-results');
 const appArea         = document.getElementById('es-app-results');
 const statusMsg       = document.getElementById('es-status');
-
-let summaryLoaded = false;
 
 // ── Micro Chart: Event Classification & Icons ───────────────────
 
@@ -129,17 +126,6 @@ function svgBriefcase() {
     + '<line x1="1" y1="9" x2="13" y2="9" stroke="white" stroke-width="1"/>'
     + '</svg>';
 }
-
-// ── Load summary on first tab view ───────────────────────────────
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    if (btn.dataset.tab === 'entity-status' && !summaryLoaded) {
-      summaryLoaded = true;
-      loadSummary();
-    }
-  });
-});
 
 // ── Single Patent Lookup ─────────────────────────────────────────
 
@@ -757,9 +743,6 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
   const tbl = document.getElementById('es-app-table');
   if (!tbl) return;
 
-  // Cap at 2000 patents for performance
-  const pats = patentNumbers.slice(0, 2000);
-
   tbl.querySelectorAll('tbody tr').forEach(row => {
     if (row.style.display !== 'none') {
       const cell = row.querySelector('.es-events-cell');
@@ -771,8 +754,8 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
     // Split into batches of 200 and fetch in parallel
     const BATCH = 200;
     const batches = [];
-    for (let i = 0; i < pats.length; i += BATCH) {
-      batches.push(pats.slice(i, i + BATCH));
+    for (let i = 0; i < patentNumbers.length; i += BATCH) {
+      batches.push(patentNumbers.slice(i, i + BATCH));
     }
     const results = await Promise.all(
       batches.map(batch => apiPost('/api/entity-status/bulk-timelines', { patent_numbers: batch }))
@@ -992,76 +975,6 @@ function showMicroChartLegend() {
   }
 
   legend.classList.remove('hidden');
-}
-
-// ── Summary Dashboard ────────────────────────────────────────────
-
-async function loadSummary() {
-  summaryArea.classList.remove('hidden');
-  summaryArea.innerHTML = '<p class="text-muted">Loading summary statistics...</p>';
-
-  try {
-    const data = await apiGet('/api/entity-status/summary');
-    renderSummary(data);
-  } catch (err) {
-    summaryArea.innerHTML = `<p class="text-muted">Could not load summary: ${escHtml(err.message)}</p>`;
-  }
-}
-
-function renderSummary(data) {
-  const totalPatents = Object.values(data.distribution).reduce((a, b) => a + b, 0);
-
-  let html = `
-    <div class="cite-summary-grid">
-      <div class="cite-stat">
-        <span class="cite-stat-value">${totalPatents.toLocaleString()}</span>
-        <span class="cite-stat-label">Patents with Entity Status</span>
-      </div>
-      <div class="cite-stat">
-        <span class="cite-stat-value">${data.total_small_filed.toLocaleString()}</span>
-        <span class="cite-stat-label">Filed as Small/Micro</span>
-      </div>
-      <div class="cite-stat">
-        <span class="cite-stat-value">${data.total_conversions.toLocaleString()}</span>
-        <span class="cite-stat-label">Small-to-Large Conversions</span>
-      </div>
-      <div class="cite-stat">
-        <span class="cite-stat-value">${data.conversion_rate}%</span>
-        <span class="cite-stat-label">Conversion Rate</span>
-      </div>
-    </div>
-  `;
-
-  // Entity status distribution
-  html += '<div class="es-dist">';
-  for (const [status, count] of Object.entries(data.distribution)) {
-    const pct = (count / totalPatents * 100).toFixed(1);
-    html += `<div class="es-dist-bar">
-      <span class="es-dist-label">${escHtml(status)}</span>
-      <div class="es-dist-track"><div class="es-dist-fill es-fill-${status.toLowerCase()}" style="width:${pct}%"></div></div>
-      <span class="es-dist-value">${count.toLocaleString()} (${pct}%)</span>
-    </div>`;
-  }
-  html += '</div>';
-
-  // Conversion by year chart
-  if (data.by_year.length > 0) {
-    const maxConv = Math.max(...data.by_year.map(y => y.small_to_large), 1);
-    html += '<h4 style="margin-top:1.5rem">Small-to-Large Conversions by Grant Year</h4>';
-    html += '<div class="cite-year-chart">';
-    for (const y of data.by_year) {
-      const pct = (y.small_to_large / maxConv * 100).toFixed(0);
-      const rate = y.total_small > 0
-        ? (y.small_to_large / y.total_small * 100).toFixed(1) : 0;
-      html += `<div class="cite-year-bar" title="${y.year}: ${y.small_to_large.toLocaleString()} conversions (${rate}% of small)">
-        <div class="cite-year-fill" style="height:${pct}%"></div>
-        <span class="cite-year-label">${String(y.year).slice(2)}</span>
-      </div>`;
-    }
-    html += '</div>';
-  }
-
-  summaryArea.innerHTML = html;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
