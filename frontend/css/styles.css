@@ -1083,6 +1083,59 @@ textarea { resize: vertical; }
   flex-shrink: 0;
 }
 
+/* Clickable KPI values — numbers that filter the Patent Details table */
+.kpi-clickable {
+  cursor: pointer;
+  color: var(--color-primary);
+  border-bottom: 1px dotted var(--color-primary);
+  transition: all .15s;
+}
+.kpi-clickable:hover {
+  color: #1e40af;
+  background: #eef2ff;
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
+.kpi-clickable.kpi-active {
+  background: #dbeafe;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-bottom: 2px solid var(--color-primary);
+  font-weight: 700;
+}
+
+/* Filter label pill — shown when a KPI is active */
+.es-filter-label {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .5rem .75rem;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--radius);
+  font-size: .85rem;
+  color: #1e40af;
+  margin-top: .75rem;
+}
+.es-filter-label.hidden { display: none !important; }
+.es-filter-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.2rem;
+  color: #6366f1;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1;
+  margin-left: auto;
+}
+.es-filter-clear:hover {
+  background: #c7d2fe;
+  color: #4338ca;
+}
+
 /* Name unification badge — shown next to normalized entity names */
 .es-unified-badge {
   display: inline-block;

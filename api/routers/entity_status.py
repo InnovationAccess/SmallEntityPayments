@@ -491,6 +491,16 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     sold_rows = bq_service.run_query(sold_sql, sold_params)
     sold_count = sold_rows[0]["sold_count"] if sold_rows else 0
 
+    # Event code → pg_by_patent field name (for building per-patent mf_events)
+    _MF_CODE_MAP = [
+        ('M1551', 'pay_m1551'), ('M1552', 'pay_m1552'), ('M1553', 'pay_m1553'),
+        ('M2551', 'pay_m2551'), ('M2552', 'pay_m2552'), ('M2553', 'pay_m2553'),
+        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'),
+        ('BIG.', 'decl_big'), ('SMAL', 'decl_smal'), ('MICR', 'decl_micr'),
+        ('STOL', 'trans_stol'), ('LTOS', 'trans_ltos'),
+        ('STOM', 'trans_stom'), ('MTOS', 'trans_mtos'),
+    ]
+
     # ── Merge results ──────────────────────────────────────────────
     PROS_CODE_MAP = {"SMAL": "SMALL", "BIG.": "LARGE", "MICR": "MICRO"}
 
@@ -606,6 +616,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             changed = True
             change_phase = "prosecution"
 
+        # Build mf_events: space-separated event codes present for this patent
+        mf_codes = [code for code, field in _MF_CODE_MAP if pg.get(field, 0) > 0]
+        mf_events = ' '.join(mf_codes)
+
         # Only add to detailed results up to display_limit
         if len(results) < display_limit:
             results.append({
@@ -615,11 +629,13 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 "filing_date": _fmt_date(r.get("filing_date")),
                 "grant_date": _fmt_date(r.get("grant_date")),
                 "prosecution_status": pros_status,
+                "prosecution_status_10y": pros_status_10y,
                 "post_grant_first": pg_first,
                 "post_grant_current": pg_latest or pg_first,
                 "status_changed": changed,
                 "change_date": _fmt_date(pg_change),
                 "change_phase": change_phase,
+                "mf_events": mf_events,
             })
 
     return {

@@ -5,6 +5,9 @@
  *   1. Single patent lookup: entity status timeline with conversion detection
  *   2. Conversion search: find patents that changed from small to large
  *   3. Applicant portfolio: entity status breakdown for one company's patents
+ *
+ * KPI numbers are clickable — clicking filters the Patent Details table to
+ * show only patents associated with those events.
  */
 
 import {
@@ -329,8 +332,21 @@ function renderApplicantPortfolio(data) {
   const pros = data.prosecution || {};
   const pg = data.post_grant || {};
   const pay = pg.payments || {m1551:0,m1552:0,m1553:0,m2551:0,m2552:0,m2553:0,m3551:0,m3552:0,m3553:0};
-  const pgConvRate = pg.total > 0
-    ? (pg.converted / pg.total * 100).toFixed(1) : 0;
+
+  // Row & column totals for payment table
+  const row35 = pay.m3551 + pay.m2551 + pay.m1551;
+  const row75 = pay.m3552 + pay.m2552 + pay.m1552;
+  const row115 = pay.m3553 + pay.m2553 + pay.m1553;
+  const colMicro = pay.m3551 + pay.m3552 + pay.m3553;
+  const colSmall = pay.m2551 + pay.m2552 + pay.m2553;
+  const colLarge = pay.m1551 + pay.m1552 + pay.m1553;
+  const grandTotal = colMicro + colSmall + colLarge;
+
+  /** Wrap a non-zero value in a clickable span with filter metadata. */
+  function kpi(val, filterSpec, label) {
+    if (!val) return '0';
+    return `<span class="kpi-clickable" data-filter="${escHtml(filterSpec)}" data-label="${escHtml(label)}">${val.toLocaleString()}</span>`;
+  }
 
   let html = `
     <div class="card">
@@ -366,38 +382,38 @@ function renderApplicantPortfolio(data) {
       <p class="text-muted" style="margin:0 0 0.5rem">From prosecution transaction codes (SMAL, BIG., MICR)</p>
       <div class="cite-summary-grid">
         <div class="cite-stat">
-          <span class="cite-stat-value">${pros.small.toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.small, 'pros:SMALL', 'Prosecution: Small')}</span>
           <span class="cite-stat-label">${statusBadge('SMALL')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${pros.micro.toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.micro, 'pros:MICRO', 'Prosecution: Micro')}</span>
           <span class="cite-stat-label">${statusBadge('MICRO')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${pros.large.toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.large, 'pros:LARGE', 'Prosecution: Large')}</span>
           <span class="cite-stat-label">${statusBadge('LARGE')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${pros.total.toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.total, 'pros:SMALL,MICRO,LARGE', 'Prosecution: All')}</span>
           <span class="cite-stat-label">Total</span>
         </div>
       </div>
       <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
       <div class="cite-summary-grid">
         <div class="cite-stat">
-          <span class="cite-stat-value">${(pros.small_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.small_10y || 0, 'pros10y:SMALL', 'Prosecution 10y: Small')}</span>
           <span class="cite-stat-label">${statusBadge('SMALL')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${(pros.micro_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.micro_10y || 0, 'pros10y:MICRO', 'Prosecution 10y: Micro')}</span>
           <span class="cite-stat-label">${statusBadge('MICRO')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${(pros.large_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.large_10y || 0, 'pros10y:LARGE', 'Prosecution 10y: Large')}</span>
           <span class="cite-stat-label">${statusBadge('LARGE')}</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${(pros.total_10y || 0).toLocaleString()}</span>
+          <span class="cite-stat-value">${kpi(pros.total_10y || 0, 'pros10y:SMALL,MICRO,LARGE', 'Prosecution 10y: All')}</span>
           <span class="cite-stat-label">Total</span>
         </div>
       </div>
@@ -409,7 +425,7 @@ function renderApplicantPortfolio(data) {
       <p class="text-muted" style="margin:0 0 0.5rem">From maintenance fee payments, declarations, and transitions</p>
       <div style="display:flex;gap:2rem;flex-wrap:wrap">
         <!-- Payments -->
-        <div style="flex:1;min-width:300px">
+        <div style="flex:1;min-width:340px">
           <div style="color:#c0392b;font-weight:600;margin-bottom:0.5rem">Payments:</div>
           <table class="data-table" style="font-size:0.85rem">
             <thead><tr>
@@ -417,27 +433,40 @@ function renderApplicantPortfolio(data) {
               <th style="text-align:center">${statusBadge('MICRO')}</th>
               <th style="text-align:center">${statusBadge('SMALL')}</th>
               <th style="text-align:center">${statusBadge('LARGE')}</th>
+              <th style="text-align:center"><strong>Total</strong></th>
             </tr></thead>
             <tbody>
               <tr>
                 <td style="font-weight:600">3.5-yr</td>
-                <td style="text-align:right">${pay.m3551.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m2551.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m1551.toLocaleString()}</td>
+                <td style="text-align:right">${kpi(pay.m3551, 'mf:M3551', 'Micro 3.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m2551, 'mf:M2551', 'Small 3.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m1551, 'mf:M1551', 'Large 3.5-yr')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(row35, 'mf:M3551,M2551,M1551', '3.5-yr Total')}</td>
               </tr>
               <tr>
                 <td style="font-weight:600">7.5-yr</td>
-                <td style="text-align:right">${pay.m3552.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m2552.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m1552.toLocaleString()}</td>
+                <td style="text-align:right">${kpi(pay.m3552, 'mf:M3552', 'Micro 7.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m2552, 'mf:M2552', 'Small 7.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m1552, 'mf:M1552', 'Large 7.5-yr')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(row75, 'mf:M3552,M2552,M1552', '7.5-yr Total')}</td>
               </tr>
               <tr>
                 <td style="font-weight:600">11.5-yr</td>
-                <td style="text-align:right">${pay.m3553.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m2553.toLocaleString()}</td>
-                <td style="text-align:right">${pay.m1553.toLocaleString()}</td>
+                <td style="text-align:right">${kpi(pay.m3553, 'mf:M3553', 'Micro 11.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m2553, 'mf:M2553', 'Small 11.5-yr')}</td>
+                <td style="text-align:right">${kpi(pay.m1553, 'mf:M1553', 'Large 11.5-yr')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(row115, 'mf:M3553,M2553,M1553', '11.5-yr Total')}</td>
               </tr>
             </tbody>
+            <tfoot>
+              <tr style="border-top:2px solid var(--color-border)">
+                <td style="font-weight:600">Total</td>
+                <td style="text-align:right;font-weight:600">${kpi(colMicro, 'mf:M3551,M3552,M3553', 'Micro Total')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(colSmall, 'mf:M2551,M2552,M2553', 'Small Total')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(colLarge, 'mf:M1551,M1552,M1553', 'Large Total')}</td>
+                <td style="text-align:right;font-weight:700">${kpi(grandTotal, 'mf:M3551,M3552,M3553,M2551,M2552,M2553,M1551,M1552,M1553', 'All Payments')}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
         <!-- Declarations -->
@@ -447,18 +476,18 @@ function renderApplicantPortfolio(data) {
             <div>
               <div style="font-weight:600;margin-bottom:0.25rem">Transitions</div>
               <div style="font-size:0.85rem;line-height:1.8">
-                Micro &gt; Small: ${(pg.mtos || 0).toLocaleString()}<br>
-                Small &gt; Micro: ${pg.stom.toLocaleString()}<br>
-                Small &gt; Large: ${pg.stol.toLocaleString()}<br>
-                Large &gt; Small: ${pg.ltos.toLocaleString()}
+                Micro &gt; Small: ${kpi(pg.mtos || 0, 'mf:MTOS', 'Micro \u2192 Small')}<br>
+                Small &gt; Micro: ${kpi(pg.stom, 'mf:STOM', 'Small \u2192 Micro')}<br>
+                Small &gt; Large: ${kpi(pg.stol, 'mf:STOL', 'Small \u2192 Large')}<br>
+                Large &gt; Small: ${kpi(pg.ltos, 'mf:LTOS', 'Large \u2192 Small')}
               </div>
             </div>
             <div>
               <div style="font-weight:600;margin-bottom:0.25rem">Status</div>
               <div style="font-size:0.85rem;line-height:1.8">
-                ${statusBadge('MICRO')}: ${(pg.decl_micr || 0).toLocaleString()}<br>
-                ${statusBadge('SMALL')}: ${(pg.decl_smal || 0).toLocaleString()}<br>
-                ${statusBadge('LARGE')}: ${(pg.decl_big || 0).toLocaleString()}
+                ${statusBadge('MICRO')}: ${kpi(pg.decl_micr || 0, 'mf:MICR', 'Declaration: Micro')}<br>
+                ${statusBadge('SMALL')}: ${kpi(pg.decl_smal || 0, 'mf:SMAL', 'Declaration: Small')}<br>
+                ${statusBadge('LARGE')}: ${kpi(pg.decl_big || 0, 'mf:BIG.', 'Declaration: Large')}
               </div>
             </div>
           </div>
@@ -466,9 +495,12 @@ function renderApplicantPortfolio(data) {
       </div>
     </div>
 
+    <!-- Filter label (shown when a KPI is clicked) -->
+    <div id="es-filter-label" class="es-filter-label hidden"></div>
+
     <div class="results-header" style="margin-top:1rem">
       <strong>Patent Details</strong>
-      <span class="results-count">${data.results.length.toLocaleString()} shown</span>
+      <span id="es-shown-count" class="results-count">${data.results.length.toLocaleString()} shown</span>
     </div>
     <div class="table-scroll-wrap">
       <table class="data-table" id="es-app-table">
@@ -489,7 +521,7 @@ function renderApplicantPortfolio(data) {
     const changedMark = r.status_changed
       ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
       : '';
-    html += `<tr>
+    html += `<tr data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}">
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
       <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
@@ -511,6 +543,78 @@ function renderApplicantPortfolio(data) {
     enableAssignmentPopup('#es-app-table .patent-number');
     addColumnPicker(tbl);
   }
+
+  // Wire clickable KPIs
+  appArea.querySelectorAll('.kpi-clickable').forEach(el => {
+    el.addEventListener('click', () => {
+      filterPatentTable(el.dataset.filter, el.dataset.label, el);
+    });
+  });
+}
+
+// ── Patent Table Filtering (for clickable KPIs) ─────────────────
+
+/**
+ * Filter the Patent Details table based on a KPI click.
+ * @param {string} filterSpec  - e.g. "mf:M2551" or "pros:SMALL,MICRO,LARGE"
+ * @param {string} label       - human-readable label for the filter pill
+ * @param {HTMLElement} clickedEl - the clicked KPI span
+ */
+function filterPatentTable(filterSpec, label, clickedEl) {
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+
+  const rows = tbl.querySelectorAll('tbody tr');
+  const filterLabel = document.getElementById('es-filter-label');
+  const shownCount = document.getElementById('es-shown-count');
+
+  // Toggle off if same KPI is clicked again
+  const prevActive = appArea.querySelector('.kpi-active');
+  if (prevActive === clickedEl) {
+    prevActive.classList.remove('kpi-active');
+    rows.forEach(row => { row.style.display = ''; });
+    if (filterLabel) filterLabel.classList.add('hidden');
+    if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    return;
+  }
+
+  // Clear previous active highlight
+  if (prevActive) prevActive.classList.remove('kpi-active');
+  clickedEl.classList.add('kpi-active');
+
+  // Parse filter spec — "field:val1,val2"
+  const colonIdx = filterSpec.indexOf(':');
+  const field = filterSpec.slice(0, colonIdx);
+  const codes = filterSpec.slice(colonIdx + 1).split(',');
+
+  let shown = 0;
+  rows.forEach(row => {
+    let match = false;
+    if (field === 'mf') {
+      const mfTokens = (row.dataset.mf || '').split(' ');
+      match = codes.some(c => mfTokens.includes(c));
+    } else if (field === 'pros') {
+      match = codes.includes(row.dataset.pros);
+    } else if (field === 'pros10y') {
+      match = codes.includes(row.dataset.pros10y);
+    }
+    row.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+
+  // Update filter label pill
+  if (filterLabel) {
+    filterLabel.innerHTML = `Filtered: <strong>${escHtml(label)}</strong> &mdash; ${shown.toLocaleString()} of ${rows.length.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
+    filterLabel.classList.remove('hidden');
+    filterLabel.querySelector('.es-filter-clear').addEventListener('click', () => {
+      clickedEl.classList.remove('kpi-active');
+      rows.forEach(row => { row.style.display = ''; });
+      filterLabel.classList.add('hidden');
+      if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    });
+  }
+
+  if (shownCount) shownCount.textContent = `${shown.toLocaleString()} of ${rows.length.toLocaleString()} shown`;
 }
 
 // ── Summary Dashboard ────────────────────────────────────────────
