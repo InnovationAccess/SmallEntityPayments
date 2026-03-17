@@ -15,6 +15,7 @@ Payment code families:
 from __future__ import annotations
 
 import sys
+from datetime import date as _date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -484,6 +485,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "divested_count": 0,
             "acquired_count": 0,
             "sold_count": 0,
+            "portfolio": {
+                "granted": {"filed": 0, "acquired": 0, "divested": 0, "expired": 0, "owned": 0},
+                "pending": {"filed": 0, "acquired": 0, "divested": 0, "owned": 0},
+            },
             "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0,
                            "small_10y": 0, "large_10y": 0, "micro_10y": 0, "total_10y": 0},
             "post_grant": {
@@ -770,6 +775,9 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     total_patents = 0
     total_applications = len(portfolio_rows)
     display_limit = min(req.limit, 50000)
+    # KPI split counters (granted vs pending)
+    filed_granted = 0; acquired_granted = 0; divested_granted = 0; expired_granted = 0
+    filed_pending = 0; acquired_pending = 0; divested_pending = 0
     # Dashboard accumulators — prosecution
     pros_small = 0
     pros_large = 0
@@ -887,6 +895,45 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         ow = ownership_map.get(app_num, (None, None))
         acq_date, div_date = ow
 
+        # Determine expired status for granted patents
+        # A patent expires if maintenance fees were missed or term ended (20 yrs)
+        expired = False
+        grant_dt = r.get("grant_date")
+        if pat_num and grant_dt and isinstance(grant_dt, _date):
+            age_days = (_date.today() - grant_dt).days
+            mf_set = set(mf_codes)
+            has_551 = any(c.endswith("551") for c in mf_set)
+            has_552 = any(c.endswith("552") for c in mf_set)
+            has_553 = any(c.endswith("553") for c in mf_set)
+            if age_days >= 7305:         # 20 years — natural expiration
+                expired = True
+            elif age_days >= 4383 and not has_553:  # 12 years, no 11.5-yr fee
+                expired = True
+            elif age_days >= 2922 and not has_552:  # 8 years, no 7.5-yr fee
+                expired = True
+            elif age_days >= 1461 and not has_551:  # 4 years, no 3.5-yr fee
+                expired = True
+
+        # KPI split counts
+        is_acquired = acq_date is not None
+        is_divested = div_date is not None
+        if pat_num:
+            if is_acquired:
+                acquired_granted += 1
+            else:
+                filed_granted += 1
+            if is_divested:
+                divested_granted += 1
+            elif expired:
+                expired_granted += 1
+        else:
+            if is_acquired:
+                acquired_pending += 1
+            else:
+                filed_pending += 1
+            if is_divested:
+                divested_pending += 1
+
         # Only add to detailed results up to display_limit
         if len(results) < display_limit:
             results.append({
@@ -903,11 +950,16 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 "change_date": _fmt_date(pg_change),
                 "change_phase": change_phase,
                 "mf_events": mf_events,
-                "acquired_via_assignment": acq_date is not None,
+                "acquired_via_assignment": is_acquired,
                 "acquired_date": _fmt_date(acq_date),
-                "divested": div_date is not None,
+                "divested": is_divested,
                 "divested_date": _fmt_date(div_date),
+                "expired": expired,
             })
+
+    # Computed KPIs
+    owned_granted = filed_granted + acquired_granted - divested_granted - expired_granted
+    owned_pending = filed_pending + acquired_pending - divested_pending
 
     return {
         "applicant_name": req.applicant_name,
@@ -917,6 +969,21 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         "divested_count": divested_count,
         "acquired_count": acquired_count,
         "sold_count": divested_count,  # backward compatibility alias
+        "portfolio": {
+            "granted": {
+                "filed": filed_granted,
+                "acquired": acquired_granted,
+                "divested": divested_granted,
+                "expired": expired_granted,
+                "owned": owned_granted,
+            },
+            "pending": {
+                "filed": filed_pending,
+                "acquired": acquired_pending,
+                "divested": divested_pending,
+                "owned": owned_pending,
+            },
+        },
         "prosecution": {
             "small": pros_small,
             "large": pros_large,

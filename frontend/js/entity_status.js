@@ -501,6 +501,10 @@ function renderApplicantPortfolio(data) {
   const pros = data.prosecution || {};
   const pg = data.post_grant || {};
   const pay = pg.payments || {m1551:0,m1552:0,m1553:0,m2551:0,m2552:0,m2553:0,m3551:0,m3552:0,m3553:0};
+  const pf = data.portfolio || {
+    granted: {filed:0, acquired:0, divested:0, expired:0, owned:0},
+    pending: {filed:0, acquired:0, divested:0, owned:0},
+  };
 
   // Row & column totals for payment table
   const row35 = pay.m3551 + pay.m2551 + pay.m1551;
@@ -524,34 +528,56 @@ function renderApplicantPortfolio(data) {
         ? `<p class="text-muted">Including ${data.expanded_names.length} name variants (applicants, inventors, and assignees)</p>`
         : ''}
 
-      <!-- Top-level summary -->
+      <!-- Granted Patents KPIs -->
+      <h4 style="margin:0.25rem 0 0.5rem;font-size:0.95rem;color:#374151">Granted Patents</h4>
       <div class="cite-summary-grid">
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.total_patents.toLocaleString()}</span>
-          <span class="cite-stat-label">Granted Patents</span>
+          <span class="cite-stat-value">${kpi(pf.granted.filed, 'portfolio:filed_granted', 'Filed Patents')}</span>
+          <span class="cite-stat-label">Filed</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${(data.total_applications - data.total_patents).toLocaleString()}</span>
-          <span class="cite-stat-label">Pending Applications</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${(data.total_patents - (data.divested_count || 0)).toLocaleString()}</span>
-          <span class="cite-stat-label">Currently Owned</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${kpi(data.divested_count || 0, 'ownership:divested', 'Divested')}</span>
-          <span class="cite-stat-label">Divested</span>
-        </div>
-        <div class="cite-stat">
-          <span class="cite-stat-value">${kpi(data.acquired_count || 0, 'ownership:acquired', 'Acquired via Assignment')}</span>
+          <span class="cite-stat-value">${kpi(pf.granted.acquired, 'portfolio:acquired_granted', 'Acquired Patents')}</span>
           <span class="cite-stat-label">Acquired</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.total_applications.toLocaleString()}</span>
-          <span class="cite-stat-label">Total Applications</span>
+          <span class="cite-stat-value">${kpi(pf.granted.divested, 'portfolio:divested_granted', 'Divested Patents')}</span>
+          <span class="cite-stat-label">Divested</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.granted.expired, 'portfolio:expired_granted', 'Expired Patents')}</span>
+          <span class="cite-stat-label">Expired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value" style="font-weight:700">${pf.granted.owned.toLocaleString()}</span>
+          <span class="cite-stat-label" style="font-weight:600">Owned</span>
         </div>
       </div>
-      <p class="text-muted" style="margin:0.5rem 0 0;font-size:0.8rem">KPIs reflect only events during the entity's ownership period</p>
+
+      <!-- Pending Applications KPIs -->
+      <h4 style="margin:1rem 0 0.5rem;font-size:0.95rem;color:#374151">Pending Applications</h4>
+      <div class="cite-summary-grid">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.filed, 'portfolio:filed_pending', 'Filed Applications')}</span>
+          <span class="cite-stat-label">Filed</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.acquired, 'portfolio:acquired_pending', 'Acquired Applications')}</span>
+          <span class="cite-stat-label">Acquired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.divested, 'portfolio:divested_pending', 'Divested Applications')}</span>
+          <span class="cite-stat-label">Divested</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">\u2014</span>
+          <span class="cite-stat-label">Expired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value" style="font-weight:700">${pf.pending.owned.toLocaleString()}</span>
+          <span class="cite-stat-label" style="font-weight:600">Owned</span>
+        </div>
+      </div>
+      <p class="text-muted" style="margin:0.5rem 0 0;font-size:0.8rem">Owned = Filed + Acquired \u2212 Divested \u2212 Expired &nbsp;|&nbsp; KPIs reflect only events during the entity's ownership period</p>
     </div>
 
     <!-- Prosecution Phase -->
@@ -713,7 +739,7 @@ function renderApplicantPortfolio(data) {
       ownershipBadge = `<span class="es-badge es-badge--owned">Owned</span>`;
     }
     const rowStyle = r.divested ? ' style="opacity:0.6"' : '';
-    html += `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}">
+    html += `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}" data-expired="${r.expired ? '1' : ''}">
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
       <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
@@ -793,6 +819,20 @@ function filterPatentTable(filterSpec, label, clickedEl) {
     } else if (field === 'ownership') {
       if (codes.includes('divested')) match = row.dataset.divested === '1';
       else if (codes.includes('acquired')) match = row.dataset.acquired === '1';
+    } else if (field === 'portfolio') {
+      const code = codes[0];
+      const isGranted = !!row.dataset.pn;
+      const isPending = !isGranted;
+      const isDivested = row.dataset.divested === '1';
+      const isAcquired = row.dataset.acquired === '1';
+      const isExpired = row.dataset.expired === '1';
+      if (code === 'filed_granted') match = isGranted && !isAcquired;
+      else if (code === 'acquired_granted') match = isGranted && isAcquired;
+      else if (code === 'divested_granted') match = isGranted && isDivested;
+      else if (code === 'expired_granted') match = isGranted && !isDivested && isExpired;
+      else if (code === 'filed_pending') match = isPending && !isAcquired;
+      else if (code === 'acquired_pending') match = isPending && isAcquired;
+      else if (code === 'divested_pending') match = isPending && isDivested;
     }
     row.style.display = match ? '' : 'none';
     if (match) {
