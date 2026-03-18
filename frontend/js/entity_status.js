@@ -591,14 +591,32 @@ function renderApplicantPortfolio(data) {
 
       <!-- Litigation KPI (populated asynchronously) -->
       <div id="es-litigation-kpis" style="display:none;margin-top:1rem">
+        <h4 class="card-title" style="font-size:1rem">Litigation History</h4>
         <div class="cite-summary-grid">
           <div class="cite-stat">
             <span class="cite-stat-value" id="es-litigated-count">\u2026</span>
-            <span class="cite-stat-label">Litigated</span>
+            <span class="cite-stat-label">Litigated Patents</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-total-cases">\u2026</span>
+            <span class="cite-stat-label">Total Cases</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-active-cases">\u2026</span>
+            <span class="cite-stat-label">Active</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-resolved-cases">\u2026</span>
+            <span class="cite-stat-label">Resolved</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-courts-count">\u2026</span>
+            <span class="cite-stat-label">Courts</span>
           </div>
         </div>
         <p class="text-muted" id="es-litigation-status" style="margin:0.25rem 0 0;font-size:0.8rem">Checking litigation history\u2026</p>
       </div>
+      <div id="es-litigation-table-wrap" style="display:none;margin-top:1rem"></div>
     </div>
 
     <!-- Prosecution Phase -->
@@ -809,7 +827,6 @@ function renderApplicantPortfolio(data) {
 
 async function fetchLitigationData(patentNumbers) {
   const kpiSection = document.getElementById('es-litigation-kpis');
-  const countEl = document.getElementById('es-litigated-count');
   const statusEl = document.getElementById('es-litigation-status');
   if (!kpiSection) return;
   kpiSection.style.display = '';
@@ -819,13 +836,31 @@ async function fetchLitigationData(patentNumbers) {
       patent_numbers: patentNumbers,
     });
 
-    // Store for micro chart injection
+    // Store for micro chart injection + litigation table
     window._litigationData = data.litigated_patents || {};
+    window._litigationCases = data.cases || [];
 
+    const cases = window._litigationCases;
     const litigatedCount = data.litigated_count || 0;
-    countEl.innerHTML = litigatedCount
-      ? `<span class="kpi-clickable" data-filter="litigation:litigated" data-label="Litigated Patents">${litigatedCount.toLocaleString()}</span>`
-      : '0';
+    const totalCases = data.total_cases || 0;
+    const activeCases = cases.filter(c => _isActiveCase(c)).length;
+    const resolvedCases = totalCases - activeCases;
+    const uniqueCourts = new Set(cases.map(c => c.court).filter(Boolean)).size;
+
+    // Populate KPI values with clickable spans
+    const litKpi = (id, val, filter, label) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = val
+        ? `<span class="kpi-clickable lit-kpi" data-litfilter="${filter}" data-label="${label}">${val.toLocaleString()}</span>`
+        : '0';
+    };
+    litKpi('es-litigated-count', litigatedCount, 'all', 'Litigated Patents');
+    litKpi('es-total-cases', totalCases, 'all', 'All Litigation Cases');
+    litKpi('es-active-cases', activeCases, 'active', 'Active Cases');
+    litKpi('es-resolved-cases', resolvedCases, 'resolved', 'Resolved Cases');
+    litKpi('es-courts-count', uniqueCourts, 'all', 'All Litigation Cases');
+
     statusEl.textContent = `${data.from_cache || 0} from cache, ${data.freshly_queried || 0} freshly queried`;
 
     // Set data-litigated on table rows
@@ -839,14 +874,152 @@ async function fetchLitigationData(patentNumbers) {
       });
     }
 
-    // Wire clickable KPI
-    kpiSection.querySelectorAll('.kpi-clickable').forEach(el => {
+    // Wire litigation KPI clicks
+    kpiSection.querySelectorAll('.lit-kpi').forEach(el => {
       el.addEventListener('click', () => {
-        filterPatentTable(el.dataset.filter, el.dataset.label, el);
+        const filter = el.dataset.litfilter;
+        const label = el.dataset.label;
+
+        // Toggle off if same KPI clicked again
+        if (el.classList.contains('kpi-active')) {
+          el.classList.remove('kpi-active');
+          hideLitigationTable();
+          // Reset patent table if "Litigated Patents" was active
+          const tbl = document.getElementById('es-app-table');
+          if (tbl) {
+            const rows = tbl.querySelectorAll('tbody tr');
+            rows.forEach(r => { r.style.display = ''; });
+            const filterLabel = document.getElementById('es-filter-label');
+            const shownCount = document.getElementById('es-shown-count');
+            if (filterLabel) filterLabel.classList.add('hidden');
+            if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+          }
+          clearMicroCharts();
+          return;
+        }
+
+        // Clear previous active highlights (both patent KPIs and lit KPIs)
+        appArea.querySelectorAll('.kpi-active').forEach(a => a.classList.remove('kpi-active'));
+        el.classList.add('kpi-active');
+
+        // Show litigation table with appropriate filter
+        if (filter === 'active') {
+          renderLitigationTable(c => _isActiveCase(c), label);
+        } else if (filter === 'resolved') {
+          renderLitigationTable(c => !_isActiveCase(c), label);
+        } else {
+          renderLitigationTable(null, label);
+        }
+
+        // If "Litigated Patents" KPI, also filter the patent table
+        if (el.closest('#es-litigated-count')) {
+          _filterPatentTableForLitigation();
+        }
       });
     });
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
+  }
+}
+
+/** Check if a case is active (not closed/terminated). */
+function _isActiveCase(c) {
+  const s = (c.status || '').toLowerCase();
+  return s !== 'closed' && s !== 'terminated' && s !== 'resolved' && s !== 'settled';
+}
+
+/** Filter patent table to show only litigated patents. */
+function _filterPatentTableForLitigation() {
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+  const rows = tbl.querySelectorAll('tbody tr');
+  let shown = 0;
+  rows.forEach(row => {
+    const match = row.dataset.litigated === '1';
+    row.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  const filterLabel = document.getElementById('es-filter-label');
+  const shownCount = document.getElementById('es-shown-count');
+  if (filterLabel) {
+    filterLabel.innerHTML = `Filtered: <strong>Litigated Patents</strong> &mdash; ${shown.toLocaleString()} of ${rows.length.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
+    filterLabel.classList.remove('hidden');
+    filterLabel.querySelector('.es-filter-clear')?.addEventListener('click', () => {
+      appArea.querySelectorAll('.kpi-active').forEach(a => a.classList.remove('kpi-active'));
+      rows.forEach(r => { r.style.display = ''; });
+      filterLabel.classList.add('hidden');
+      if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+      hideLitigationTable();
+      clearMicroCharts();
+    });
+  }
+  if (shownCount) shownCount.textContent = `${shown.toLocaleString()} shown`;
+}
+
+/** Render the litigation cases table. */
+function renderLitigationTable(filterFn, title) {
+  const wrap = document.getElementById('es-litigation-table-wrap');
+  if (!wrap) return;
+
+  const cases = window._litigationCases || [];
+  const filtered = filterFn ? cases.filter(filterFn) : cases;
+
+  let html = `<h4 style="font-size:1rem;margin-bottom:0.5rem">${escHtml(title || 'Litigation Cases')} (${filtered.length})</h4>`;
+  html += '<div class="table-scroll-wrap"><table id="es-litigation-table" class="data-table"><thead><tr>';
+
+  const cols = [
+    { key: 'case_no', label: 'Case' },
+    { key: 'filed_date', label: 'Filing Date' },
+    { key: 'status', label: 'Status' },
+    { key: 'court', label: 'Court' },
+    { key: 'plaintiff', label: 'Plaintiff' },
+    { key: 'defendant', label: 'Defendant' },
+    { key: 'cause_of_action', label: 'Cause of Action' },
+    { key: 'entity_type', label: 'Plaintiff Entity Type' },
+    { key: 'industry', label: 'Industry' },
+    { key: 'flag', label: 'Source' },
+    { key: 'portfolio_patents', label: 'Patents in Case' },
+    { key: 'judge', label: 'Judge' },
+    { key: 'closed_date', label: 'Termination Date' },
+    { key: 'product', label: 'Infringed Product' },
+  ];
+  const defaultHidden = ['Cause of Action', 'Plaintiff Entity Type', 'Industry', 'Source', 'Patents in Case', 'Judge', 'Termination Date', 'Infringed Product'];
+
+  for (const col of cols) {
+    html += `<th>${escHtml(col.label)}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const c of filtered) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = c[col.key] || '';
+      if (col.key === 'portfolio_patents' && Array.isArray(val)) {
+        val = val.join(', ');
+      }
+      html += `<td>${escHtml(String(val))}</td>`;
+    }
+    html += '</tr>';
+  }
+
+  html += '</tbody></table></div>';
+  wrap.innerHTML = html;
+  wrap.style.display = '';
+
+  const litTbl = document.getElementById('es-litigation-table');
+  if (litTbl) {
+    stampOriginalOrder(litTbl);
+    enableTableSorting(litTbl);
+    addColumnPicker(litTbl, { defaultHidden });
+  }
+}
+
+/** Hide the litigation table. */
+function hideLitigationTable() {
+  const wrap = document.getElementById('es-litigation-table-wrap');
+  if (wrap) {
+    wrap.innerHTML = '';
+    wrap.style.display = 'none';
   }
 }
 
@@ -871,6 +1044,7 @@ function filterPatentTable(filterSpec, label, clickedEl) {
     rows.forEach(row => { row.style.display = ''; });
     if (filterLabel) filterLabel.classList.add('hidden');
     if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    hideLitigationTable();
     clearMicroCharts();
     return;
   }
@@ -878,6 +1052,9 @@ function filterPatentTable(filterSpec, label, clickedEl) {
   // Clear previous active highlight
   if (prevActive) prevActive.classList.remove('kpi-active');
   clickedEl.classList.add('kpi-active');
+
+  // Hide litigation table when a non-litigation KPI is clicked
+  hideLitigationTable();
 
   // Parse filter spec — "field:val1,val2"
   const colonIdx = filterSpec.indexOf(':');

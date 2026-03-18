@@ -34,7 +34,7 @@ CACHE_DAYS = 30
 _SOURCE_FIELDS = [
     "case_id", "case_no", "filed_date", "closed_date", "court",
     "status", "cause_of_action", "plaintiff", "defendant",
-    "judge", "flag", "patents",
+    "judge", "flag", "patents", "product", "entity_type", "industry",
 ]
 
 
@@ -63,7 +63,10 @@ def litigation_lookup(req: LitigationRequest) -> Dict[str, Any]:
     fresh_results: Dict[str, List[Dict]] = {}
     if uncached:
         fresh_results = _query_api_batched(uncached)
-        _write_cache(fresh_results, uncached)
+        try:
+            _write_cache(fresh_results, uncached)
+        except Exception:
+            logger.exception("Failed to write litigation cache")
 
     # Step 3: Load cached litigation records (only for previously-cached patents)
     cached_results = _load_cached_litigation(list(cached_set)) if cached_set else {}
@@ -75,9 +78,20 @@ def litigation_lookup(req: LitigationRequest) -> Dict[str, Any]:
         if cases:
             litigated[pn] = cases
 
+    # Build case-centric list (deduplicated by case_id)
+    case_map: Dict[str, Dict] = {}
+    for pn, pn_cases in litigated.items():
+        for c in pn_cases:
+            cid = c.get("case_id", "")
+            if cid not in case_map:
+                case_map[cid] = {**c, "portfolio_patents": []}
+            case_map[cid]["portfolio_patents"].append(pn)
+
     return {
         "litigated_patents": litigated,
+        "cases": list(case_map.values()),
         "litigated_count": len(litigated),
+        "total_cases": len(case_map),
         "total_checked": len(patent_numbers),
         "from_cache": len(cached_set),
         "freshly_queried": len(uncached),
@@ -114,12 +128,14 @@ def _load_cached_litigation(patent_numbers: List[str]) -> Dict[str, List[Dict]]:
     ]
     sql = f"""
     SELECT patent_number, case_id, case_no, filed_date, closed_date,
-           court, status, cause_of_action, plaintiff, defendant, judge, flag
+           court, status, cause_of_action, plaintiff, defendant, judge, flag,
+           entity_type, industry, product
     FROM `{settings.patent_litigation_table}`
     WHERE patent_number IN UNNEST(@pn_list)
       AND fetched_date >= @cutoff
     GROUP BY patent_number, case_id, case_no, filed_date, closed_date,
-             court, status, cause_of_action, plaintiff, defendant, judge, flag
+             court, status, cause_of_action, plaintiff, defendant, judge, flag,
+             entity_type, industry, product
     """
     rows = bq_service.run_query(sql, params)
     result: Dict[str, List[Dict]] = {}
@@ -135,6 +151,11 @@ def _load_cached_litigation(patent_numbers: List[str]) -> Dict[str, List[Dict]]:
             "cause_of_action": r.get("cause_of_action"),
             "plaintiff": r.get("plaintiff"),
             "defendant": r.get("defendant"),
+            "judge": r.get("judge"),
+            "flag": r.get("flag"),
+            "entity_type": r.get("entity_type"),
+            "industry": r.get("industry"),
+            "product": r.get("product"),
         })
     return result
 
@@ -189,6 +210,9 @@ def _query_unified_patents(patent_numbers: List[str]) -> Dict[str, List[Dict]]:
             "defendant": "; ".join(src.get("defendant") or []),
             "judge": "; ".join(src.get("judge") or []),
             "flag": src.get("flag", ""),
+            "product": _join_field(src.get("product")),
+            "entity_type": _join_field(src.get("entity_type")),
+            "industry": _join_field(src.get("industry")),
         }
         # Each case may involve multiple patents — link to each
         for pn in src.get("patents") or []:
@@ -223,6 +247,9 @@ def _write_cache(
                 "defendant": c["defendant"],
                 "judge": c["judge"],
                 "flag": c["flag"],
+                "entity_type": c.get("entity_type", ""),
+                "industry": c.get("industry", ""),
+                "product": c.get("product", ""),
                 "fetched_date": today_str,
             })
     if lit_rows:
@@ -266,10 +293,21 @@ def _fmt_date(val) -> str | None:
     return str(val) if val else None
 
 
+def _join_field(val) -> str:
+    """Join a field that may be a list or a string."""
+    if not val:
+        return ""
+    if isinstance(val, list):
+        return "; ".join(str(v) for v in val)
+    return str(val)
+
+
 def _empty_response() -> Dict[str, Any]:
     return {
         "litigated_patents": {},
+        "cases": [],
         "litigated_count": 0,
+        "total_cases": 0,
         "total_checked": 0,
         "from_cache": 0,
         "freshly_queried": 0,
