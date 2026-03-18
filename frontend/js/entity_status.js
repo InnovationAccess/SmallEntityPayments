@@ -1134,6 +1134,7 @@ async function fetchProsecutionPayments() {
       summary: {},
       kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0 },
       date_range: null,
+      cache_stats: { from_cache: 0, freshly_analyzed: 0 },
     };
 
     for (let i = 0; i < batches.length; i++) {
@@ -1174,6 +1175,11 @@ async function fetchProsecutionPayments() {
           if (resp.date_range.max > merged.date_range.max) merged.date_range.max = resp.date_range.max;
         }
       }
+
+      // Merge cache stats
+      const cs = resp.cache_stats || {};
+      merged.cache_stats.from_cache += cs.from_cache || 0;
+      merged.cache_stats.freshly_analyzed += cs.freshly_analyzed || 0;
     }
 
     // Recount apps_with_findings from merged data
@@ -1236,7 +1242,10 @@ async function fetchProsecutionPayments() {
       fetchAndRenderMicroCharts(visiblePatents);
     }
 
-    if (statusEl) statusEl.textContent = `Analysis complete. ${merged.kpis.total.toLocaleString()} payment events found across ${allApps.length.toLocaleString()} applications.`;
+    const cacheMsg = merged.cache_stats.from_cache > 0
+      ? ` (${merged.cache_stats.from_cache.toLocaleString()} from cache, ${merged.cache_stats.freshly_analyzed.toLocaleString()} freshly analyzed)`
+      : '';
+    if (statusEl) statusEl.textContent = `Analysis complete. ${merged.kpis.total.toLocaleString()} payment events found across ${allApps.length.toLocaleString()} applications${cacheMsg}.`;
     if (btn) { btn.textContent = 'Re-Analyze'; btn.disabled = false; }
 
   } catch (err) {

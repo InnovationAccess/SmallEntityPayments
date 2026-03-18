@@ -116,5 +116,9 @@ class Settings:
     def patent_litigation_cache_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_litigation_cache"
 
+    @property
+    def prosecution_payment_cache_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.prosecution_payment_cache"
+
 
 settings = Settings()

@@ -14,8 +14,10 @@ Payment code families:
 
 from __future__ import annotations
 
+import json
+import logging
 import sys
-from datetime import date as _date
+from datetime import date as _date, datetime as _datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from utils.patent_number import normalize_patent_number
 
 router = APIRouter(prefix="/api/entity-status", tags=["Entity Status"])
+log = logging.getLogger(__name__)
 
 # ── SQL fragment: derive entity status from event_code ────────────
 # Used in all queries instead of trusting the entity_status column.
@@ -464,21 +467,167 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
 def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any]:
     """Prosecution payment analysis: status segments + payment events.
 
-    For each application, builds:
-      1. Status segments — date ranges for each entity status period
-         (LARGE/SMALL/MICRO) derived from 14 status-change codes.
-      2. Payment events — all 102 prosecution fee payment events,
-         each classified by which status segment its date falls into.
+    Uses a BigQuery cache table (prosecution_payment_cache) to avoid
+    re-analyzing applications that have already been processed.  Only
+    uncached applications are queried from pfw_transactions.
 
     Max 200 applications per request.
     """
+    empty = {"timelines": {}, "date_range": None,
+             "payments_detail": [], "summary": {},
+             "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
+                      "apps_with_findings": 0},
+             "cache_stats": {"from_cache": 0, "freshly_analyzed": 0}}
     if not req.application_numbers:
-        return {"timelines": {}, "date_range": None,
-                "payments_detail": [], "summary": {},
-                "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
-                         "apps_with_findings": 0}}
+        return empty
 
     an_list = req.application_numbers[:200]
+
+    # ── Step 1: Check cache ──────────────────────────────────────
+    cache_params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
+    cache_sql = f"""
+    SELECT application_number, segments, payments,
+           small_count, micro_count, large_count, filing_date
+    FROM `{settings.prosecution_payment_cache_table}`
+    WHERE application_number IN UNNEST(@an_list)
+    """
+    cache_rows = bq_service.run_query(cache_sql, cache_params)
+
+    cached: Dict[str, dict] = {}
+    for r in cache_rows:
+        an = r["application_number"]
+        cached[an] = {
+            "segments": json.loads(r["segments"]) if r.get("segments") else [],
+            "payments": json.loads(r["payments"]) if r.get("payments") else [],
+            "small_count": r.get("small_count", 0),
+            "micro_count": r.get("micro_count", 0),
+            "large_count": r.get("large_count", 0),
+            "filing_date": r.get("filing_date"),
+        }
+
+    uncached = [an for an in an_list if an not in cached]
+    from_cache = len(cached)
+    freshly_analyzed = 0
+
+    # ── Step 2: Analyze uncached apps ────────────────────────────
+    fresh: Dict[str, dict] = {}
+    if uncached:
+        fresh = _analyze_prosecution_apps(uncached)
+        freshly_analyzed = len(fresh)
+
+        # ── Step 3: Save fresh results to cache ──────────────────
+        _save_prosecution_cache(fresh)
+
+    # ── Step 4: Merge cached + fresh, build response ─────────────
+    timelines: Dict[str, dict] = {}
+    payments_detail = []
+    summary: Dict[str, Dict[str, int]] = {}
+    kpi_small = 0
+    kpi_micro = 0
+    kpi_large = 0
+    apps_with_findings: set = set()
+    global_min = None
+    global_max = None
+
+    def _update_range_str(d_str):
+        nonlocal global_min, global_max
+        if not d_str:
+            return
+        if global_min is None or d_str < global_min:
+            global_min = d_str
+        if global_max is None or d_str > global_max:
+            global_max = d_str
+
+    # Process all apps (from cache or fresh analysis)
+    for an in an_list:
+        if an in fresh:
+            tl = fresh[an]
+        elif an in cached:
+            tl = cached[an]
+        else:
+            continue  # app had no data in either source
+
+        timelines[an] = {"segments": tl["segments"], "payments": tl["payments"]}
+
+        # Update date range from segments
+        for seg in tl["segments"]:
+            _update_range_str(seg.get("start"))
+            _update_range_str(seg.get("end"))
+
+        # Count KPIs and build detail/summary from payments
+        for pay in tl["payments"]:
+            _update_range_str(pay.get("d"))
+            pay_status = pay.get("status", "LARGE")
+
+            if pay_status == "SMALL":
+                kpi_small += 1
+                apps_with_findings.add(an)
+            elif pay_status == "MICRO":
+                kpi_micro += 1
+                apps_with_findings.add(an)
+            else:
+                kpi_large += 1
+
+            # Summary pivot
+            yr = pay["d"][:4] if pay.get("d") else "Unknown"
+            if yr not in summary:
+                summary[yr] = {}
+            summary[yr][pay["c"]] = summary[yr].get(pay["c"], 0) + 1
+
+            # Detail record for Small + Micro
+            if pay_status in ("SMALL", "MICRO"):
+                # Find origin from segment
+                origin_code = None
+                origin_date = None
+                for seg in tl["segments"]:
+                    seg_start = seg.get("start")
+                    seg_end = seg.get("end")
+                    if seg_start and pay["d"] >= seg_start:
+                        if seg_end is None or pay["d"] < seg_end:
+                            origin_code = seg.get("trigger")
+                            origin_date = seg_start
+                            break
+                payments_detail.append({
+                    "application_number": an,
+                    "event_date": pay["d"],
+                    "event_code": pay["c"],
+                    "event_description": pay.get("desc", ""),
+                    "claimed_status": pay_status,
+                    "origin_code": origin_code,
+                    "origin_date": origin_date,
+                })
+
+    log.info("Prosecution timelines: %d from cache, %d freshly analyzed",
+             from_cache, freshly_analyzed)
+
+    return {
+        "timelines": timelines,
+        "date_range": {
+            "min": global_min,
+            "max": global_max,
+        } if global_min and global_max else None,
+        "payments_detail": payments_detail,
+        "summary": summary,
+        "kpis": {
+            "small": kpi_small,
+            "micro": kpi_micro,
+            "large": kpi_large,
+            "total": kpi_small + kpi_micro + kpi_large,
+            "apps_with_findings": len(apps_with_findings),
+        },
+        "cache_stats": {
+            "from_cache": from_cache,
+            "freshly_analyzed": freshly_analyzed,
+        },
+    }
+
+
+def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
+    """Analyze prosecution payments for a list of application numbers.
+
+    Returns dict: application_number → {segments, payments, small_count,
+    micro_count, large_count, filing_date}.
+    """
     params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
 
     # ── Query A: Status-change events (for building segments) ────
@@ -509,7 +658,6 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     WHERE application_number IN UNNEST(@an_list)
     """
 
-    # Run all three queries
     seg_rows = bq_service.run_query(seg_sql, params)
     pay_rows = bq_service.run_query(pay_sql, params)
     filing_rows = bq_service.run_query(filing_sql, params)
@@ -520,7 +668,6 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
         if r.get("filing_date"):
             filing_dates[r["application_number"]] = r["filing_date"]
 
-    # ── Build status segments per application ─────────────────────
     # Group status-change events by application
     seg_by_app: Dict[str, list] = {}
     for r in seg_rows:
@@ -531,19 +678,9 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
             "status": _PROS_STATUS_CODES.get(r["event_code"], "LARGE"),
         })
 
-    # For each application, build ordered segments
+    # Build segments per application
     today = _date.today()
-    timelines: Dict[str, dict] = {}
-    global_min = None
-    global_max = None
-
-    def _update_range(d):
-        nonlocal global_min, global_max
-        if d:
-            if global_min is None or d < global_min:
-                global_min = d
-            if global_max is None or d > global_max:
-                global_max = d
+    results: Dict[str, dict] = {}
 
     for an in an_list:
         filing_d = filing_dates.get(an)
@@ -551,7 +688,6 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
         segments = []
 
         if not changes:
-            # No status changes → entire period is LARGE (default)
             start = filing_d or today
             segments.append({
                 "status": "LARGE",
@@ -559,9 +695,7 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                 "end": None,
                 "trigger": None,
             })
-            _update_range(start)
         else:
-            # First implicit segment: LARGE from filing to first change
             first_change_date = changes[0]["date"]
             seg_start = filing_d or first_change_date
             if seg_start < first_change_date:
@@ -571,9 +705,7 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                     "end": _fmt_date(first_change_date),
                     "trigger": None,
                 })
-            _update_range(seg_start)
 
-            # Each status change starts a new segment
             for i, ch in enumerate(changes):
                 end_date = changes[i + 1]["date"] if i + 1 < len(changes) else None
                 segments.append({
@@ -582,13 +714,16 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                     "end": _fmt_date(end_date),
                     "trigger": ch["code"],
                 })
-                _update_range(ch["date"])
-                if end_date:
-                    _update_range(end_date)
 
-        timelines[an] = {"segments": segments, "payments": []}
+        results[an] = {
+            "segments": segments,
+            "payments": [],
+            "small_count": 0,
+            "micro_count": 0,
+            "large_count": 0,
+            "filing_date": filing_d,
+        }
 
-    # ── Classify payment events by status segment ─────────────────
     # Group payments by application
     pay_by_app: Dict[str, list] = {}
     for r in pay_rows:
@@ -599,35 +734,22 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
             "desc": r.get("event_description", ""),
         })
 
-    payments_detail = []
-    summary: Dict[str, Dict[str, int]] = {}  # year → {code: count}
-    kpi_small = 0
-    kpi_micro = 0
-    kpi_large = 0
-    apps_with_findings: set = set()
-
+    # Classify each payment by segment
     for an in an_list:
-        if an not in timelines:
+        if an not in results:
             continue
-        tl = timelines[an]
+        tl = results[an]
         payments = pay_by_app.get(an, [])
 
         for pay in payments:
             pay_date = pay["date"]
-            _update_range(pay_date)
-
-            # Determine status at payment date by finding the segment
-            pay_status = "LARGE"  # default
-            origin_code = None
-            origin_date = None
+            pay_status = "LARGE"
             for seg in tl["segments"]:
                 seg_start = _date.fromisoformat(seg["start"]) if seg["start"] else None
                 seg_end = _date.fromisoformat(seg["end"]) if seg["end"] else None
                 if seg_start and pay_date >= seg_start:
                     if seg_end is None or pay_date < seg_end:
                         pay_status = seg["status"]
-                        origin_code = seg["trigger"]
-                        origin_date = seg["start"]
                         break
 
             tl["payments"].append({
@@ -637,50 +759,68 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                 "status": pay_status,
             })
 
-            # KPI counting
             if pay_status == "SMALL":
-                kpi_small += 1
-                apps_with_findings.add(an)
+                tl["small_count"] += 1
             elif pay_status == "MICRO":
-                kpi_micro += 1
-                apps_with_findings.add(an)
+                tl["micro_count"] += 1
             else:
-                kpi_large += 1
+                tl["large_count"] += 1
 
-            # Summary pivot: year × code (all payments)
-            yr = str(pay_date.year) if hasattr(pay_date, "year") else "Unknown"
-            if yr not in summary:
-                summary[yr] = {}
-            summary[yr][pay["code"]] = summary[yr].get(pay["code"], 0) + 1
+    return results
 
-            # Detail record for Small + Micro payments
-            if pay_status in ("SMALL", "MICRO"):
-                payments_detail.append({
-                    "application_number": an,
-                    "event_date": _fmt_date(pay_date),
-                    "event_code": pay["code"],
-                    "event_description": pay["desc"],
-                    "claimed_status": pay_status,
-                    "origin_code": origin_code,
-                    "origin_date": origin_date,
-                })
 
-    return {
-        "timelines": timelines,
-        "date_range": {
-            "min": _fmt_date(global_min),
-            "max": _fmt_date(global_max),
-        } if global_min and global_max else None,
-        "payments_detail": payments_detail,
-        "summary": summary,
-        "kpis": {
-            "small": kpi_small,
-            "micro": kpi_micro,
-            "large": kpi_large,
-            "total": kpi_small + kpi_micro + kpi_large,
-            "apps_with_findings": len(apps_with_findings),
-        },
-    }
+def _save_prosecution_cache(results: Dict[str, dict]) -> None:
+    """Save analyzed prosecution payment results to BigQuery cache table."""
+    if not results:
+        return
+
+    client = bq_service.client
+    table_ref = settings.prosecution_payment_cache_table
+    now = _datetime.utcnow().isoformat()
+
+    rows_to_insert = []
+    for an, tl in results.items():
+        # Find latest event date across segments and payments
+        latest = None
+        for seg in tl["segments"]:
+            if seg.get("start") and (latest is None or seg["start"] > latest):
+                latest = seg["start"]
+            if seg.get("end") and (latest is None or seg["end"] > latest):
+                latest = seg["end"]
+        for pay in tl["payments"]:
+            if pay.get("d") and (latest is None or pay["d"] > latest):
+                latest = pay["d"]
+
+        rows_to_insert.append({
+            "application_number": an,
+            "analyzed_at": now,
+            "filing_date": _fmt_date(tl.get("filing_date")),
+            "segments": json.dumps(tl["segments"]),
+            "payments": json.dumps(tl["payments"]),
+            "small_count": tl.get("small_count", 0),
+            "micro_count": tl.get("micro_count", 0),
+            "large_count": tl.get("large_count", 0),
+            "latest_event_date": latest,
+        })
+
+    # Delete any existing rows for these apps, then insert fresh
+    an_delete = list(results.keys())
+    del_params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_delete)]
+    del_sql = f"""
+    DELETE FROM `{table_ref}`
+    WHERE application_number IN UNNEST(@an_list)
+    """
+    try:
+        bq_service.run_query(del_sql, del_params)
+    except Exception:
+        pass  # table might be empty
+
+    # Insert in batches of 500
+    for i in range(0, len(rows_to_insert), 500):
+        batch = rows_to_insert[i:i + 500]
+        errors = client.insert_rows_json(table_ref, batch)
+        if errors:
+            log.error("Cache insert errors: %s", errors[:3])
 
 
 @router.post("/by-applicant")
