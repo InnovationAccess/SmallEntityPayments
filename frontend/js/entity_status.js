@@ -934,10 +934,15 @@ function _filterPatentTableForLitigation() {
   if (!tbl) return;
   const rows = tbl.querySelectorAll('tbody tr');
   let shown = 0;
+  const visiblePatents = [];
   rows.forEach(row => {
     const match = row.dataset.litigated === '1';
     row.style.display = match ? '' : 'none';
-    if (match) shown++;
+    if (match) {
+      shown++;
+      const pn = row.dataset.pn;
+      if (pn) visiblePatents.push(pn);
+    }
   });
   const filterLabel = document.getElementById('es-filter-label');
   const shownCount = document.getElementById('es-shown-count');
@@ -954,6 +959,13 @@ function _filterPatentTableForLitigation() {
     });
   }
   if (shownCount) shownCount.textContent = `${shown.toLocaleString()} shown`;
+
+  // Fetch and render micro charts for visible litigated patents
+  if (visiblePatents.length > 0) {
+    fetchAndRenderMicroCharts(visiblePatents, 'litigation:litigated');
+  } else {
+    clearMicroCharts();
+  }
 }
 
 /** Render the litigation cases table. */
