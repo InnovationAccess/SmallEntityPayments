@@ -476,7 +476,9 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     empty = {"timelines": {}, "date_range": None,
              "payments_detail": [], "summary": {},
              "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
-                      "apps_with_findings": 0},
+                      "apps_with_findings": 0,
+                      "small_10y": 0, "micro_10y": 0, "large_10y": 0,
+                      "total_10y": 0, "apps_with_findings_10y": 0},
              "cache_stats": {"from_cache": 0, "freshly_analyzed": 0}}
     if not req.application_numbers:
         return empty
@@ -525,9 +527,14 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     kpi_small = 0
     kpi_micro = 0
     kpi_large = 0
+    kpi_small_10y = 0
+    kpi_micro_10y = 0
+    kpi_large_10y = 0
     apps_with_findings: set = set()
+    apps_with_findings_10y: set = set()
     global_min = None
     global_max = None
+    ten_yr_cutoff = _fmt_date(_date.today().replace(year=_date.today().year - 10))
 
     def _update_range_str(d_str):
         nonlocal global_min, global_max
@@ -567,6 +574,17 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                 apps_with_findings.add(an)
             else:
                 kpi_large += 1
+
+            # 10-year window KPIs
+            if pay.get("d") and pay["d"] >= ten_yr_cutoff:
+                if pay_status == "SMALL":
+                    kpi_small_10y += 1
+                    apps_with_findings_10y.add(an)
+                elif pay_status == "MICRO":
+                    kpi_micro_10y += 1
+                    apps_with_findings_10y.add(an)
+                else:
+                    kpi_large_10y += 1
 
             # Summary pivot
             yr = pay["d"][:4] if pay.get("d") else "Unknown"
@@ -614,6 +632,11 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
             "large": kpi_large,
             "total": kpi_small + kpi_micro + kpi_large,
             "apps_with_findings": len(apps_with_findings),
+            "small_10y": kpi_small_10y,
+            "micro_10y": kpi_micro_10y,
+            "large_10y": kpi_large_10y,
+            "total_10y": kpi_small_10y + kpi_micro_10y + kpi_large_10y,
+            "apps_with_findings_10y": len(apps_with_findings_10y),
         },
         "cache_stats": {
             "from_cache": from_cache,

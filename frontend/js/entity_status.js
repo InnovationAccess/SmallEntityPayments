@@ -43,6 +43,112 @@ const statusMsg       = document.getElementById('es-status');
 const STATUS_COLORS = { large: '#ef4444', small: '#22c55e', micro: '#3b82f6' };
 const GRAY = '#6b7280';
 
+// Prosecution payment event code descriptions (for tooltips)
+const PROS_PAY_DESCRIPTIONS = {
+  'A.I.': 'Informal or Non-Responsive Amendment after Examiner Action',
+  'A.LA': 'Untimely (Late) Amendment Filed',
+  'A.NQ': 'Amendment Crossed in Mail',
+  'A.NR': 'Non-Responsive Amendment after Non-Final Action',
+  'A.PE': 'Preliminary Amendment',
+  'A371': 'Applicant 371 Filing Paper Received',
+  'AABR': 'Amendment After Brief',
+  'ABN/': 'Abandonment - Filing Fee Not Paid',
+  'ABN6': 'Abandonment for Failure to Pay Issue Fee',
+  'ABN9': 'Disposal for a RCE / CPA / R129',
+  'ABNF': 'Abandonment - Filing Fee Paid',
+  'ACKNAHA': 'I.B. Acknowledged Receipt of NOA (Hague)',
+  'ADDDWRG': 'Omitted Drawing Sheets (Changes Filing Date)',
+  'ADDFLFEE': 'Additional Application Filing Fees',
+  'ADDSPEC': 'Omitted Specification Pages (Changes Filing Date)',
+  'AFNE': 'After Final Consideration Program Amendment too Extensive',
+  'AP.B': 'Appeal Brief Filed',
+  'AP.C': 'Request for Pre-Appeal Conference Filed',
+  'AP.C3': 'Request for Pre-Appeal Conf. 3 Path',
+  'AP/A': 'Amendment/Argument after Notice of Appeal',
+  'APBD': 'Notice - Defective Appeal Brief',
+  'APBI': 'Defective / Incomplete Appeal Brief Filed',
+  'APBR': 'Appeal Brief Review Complete',
+  'APCA': 'Pre-Appeal Conf. Decision - Rejection Withdrawn',
+  'APCD': 'Pre-Appeal Conf. Decision - Request Defective',
+  'APCP': 'Pre-Appeal Conf. Decision - Proceed to PTAB',
+  'APCR': 'Pre-Appeal Conf. Decision - Reopen Prosecution',
+  'APE2': '2nd or Subsequent Examiner Answer to Appeal Brief',
+  'APEA': 'Examiner Answer to Appeal Brief',
+  'APFC': 'Appeal to District or Federal Court Filed',
+  'APHT': 'PTAB Oral Hearing Transcript',
+  'APND': 'Notice - Defective Notice of Appeal',
+  'APNH': 'Notification of Appeal Hearing',
+  'APNH.CA': 'Appeal Hearing - Silicon Valley, CA',
+  'APNH.CO': 'Appeal Hearing - Denver, CO',
+  'APNH.MI': 'Appeal Hearing - Detroit, MI',
+  'APNH.TX': 'Appeal Hearing - Dallas, TX',
+  'APNH.VA': 'Appeal Hearing - Alexandria, VA',
+  'APOH': 'Request for Oral Hearing',
+  'APRD': 'Order Returning Undocketed Appeal to Examiner',
+  'APRR': 'Request for Reconsideration of Appeal Decision',
+  'ARBP': 'Appeal Ready for PAC Review',
+  'BRCE': 'Workflow - Request for RCE - Begin',
+  'C610': 'Foreign Priority Papers Filed',
+  'C9DE': 'COVID-19 Deferred Fee Program - Denial',
+  'C9GR': 'COVID-19 Deferred Fee Program - Acceptance',
+  'CPA-AMD': 'RCE Amendment Informal or Non-Responsive',
+  'DIST': 'Terminal Disclaimer Filed',
+  'FEE.': 'Fee Payment Recorded',
+  'FLFEE': 'Payment of Additional Filing Fee',
+  'FRCE': 'Workflow - Request for RCE - Finish',
+  'IDS.': 'Information Disclosure Statement Filed',
+  'IDSPTA': 'PTA Statement Filed with IDS',
+  'IFEE': 'Issue Fee Payment Received',
+  'IFEEHA': 'Issue Fee Data Received from I.B. (Hague)',
+  'IRCE': 'Improper Request for Continued Examination',
+  'J521': 'Amicus Brief Received',
+  'JA94': 'Request for Extension of Time to Appeal to CAFC',
+  'JA95': 'Extension of Time Granted to Appeal to CAFC',
+  'JS13': 'Petition for Certiorari Received',
+  'MABN6': 'Mail Abandonment for Failure to Pay Issue Fee',
+  'MAPHT': 'Mail PTAB Oral Hearing Transcript',
+  'MCPA-AMD': 'Mail Notice of Informal/Non-Responsive RCE Amendment',
+  'MODPD28': 'Mail Issue Fee Returned Unpaid',
+  'MODPD33': 'Mail Notice Regarding Unsigned 85B Form',
+  'MP005': 'Mail Petition Granted - Accept Delayed Issue Fee',
+  'MP020': 'Mail Petition Granted - Extension of Time in Reexam',
+  'MQRCE': 'Mail Quick Path IDS Examiner-Directed Entry of RCE',
+  'MRAPD': 'RX - Mail Notice of Appeal Defective',
+  'MRAPS': 'RX - Mail Supplemental Examiner Answer to Appeal',
+  'MRXEAS': 'RX - Mail Supplemental Examiner Answer to Appeal Brief',
+  'MRXG.': 'RX - Mail Extension of Time Granted',
+  'MRXTG': 'RX - Mail Extension of Time Granted',
+  'MSML': 'Verified Statement of Micro to Small Entity Status',
+  'N/AP': 'Notice of Appeal Filed',
+  'N/AP-NOA': 'Notice of Appeal Filed After NOA',
+  'N084': 'Issue Fee Payment Verified',
+  'NOIFIBHA': 'Issue Fee Not Paid Directly to I.B. (Hague)',
+  'ODPD28': 'Issue Fee Returned Unpaid',
+  'ODPD33': 'Notice Regarding Unsigned 85B Form',
+  'ODPET4': 'Petition to Revive Application - Dismissed',
+  'P003': 'Petition Granted to Make Special',
+  'P005': 'Petition Granted - Accept Delayed Issue Fee',
+  'P007': 'Petition Granted - Withdraw from Issue for Abandonment',
+  'P010': 'Petition Granted Related to Filing Date',
+  'P012': 'Petition Granted Related to Inventor',
+  'P020': 'Petition Granted - Extension of Time in Reexam',
+  'P131': 'Form Deleted',
+  'P138': 'Communication Regarding Extension of Time',
+  'PFP': 'Petition Fee Paid',
+  'PMFP': 'Petition to Accept Late Maintenance Fee Payment',
+  'QRCE': 'Quick Path IDS Examiner-Directed Entry of RCE',
+  'RCEX': 'Request for Continued Examination (RCE)',
+  'RETF': 'Payment of Retention Fee',
+  'RVIFEEHA': 'Reversal of Issue Fee by I.B. (Hague)',
+  'RXIDS.R': 'Reexam - IDS Filed by Third Party Requester',
+  'RXRQ/T': 'Request for Extension of Time',
+  'RXSAPB': 'Supplemental Appeal Brief Filed',
+  'RXXT/G': 'Request for Extension of Time Granted',
+  'TDP': 'Terminal Disclaimer Fee Paid',
+  'VFEE': 'Reverse Issue Fee',
+  'XT/G': 'Request for Extension of Time - Granted',
+};
+
 // Prosecution status-change codes (beyond the 3 basic ones)
 const _PROS_TO_SMALL = new Set(['SES','SMAL','P013','MP013','MSML','NOSE','MRNSME']);
 const _PROS_TO_MICRO = new Set(['MICR','MENC','PMRIA','MPMRIA']);
@@ -661,6 +767,29 @@ function renderApplicantPortfolio(data) {
               <span class="cite-stat-label">Apps w/ Findings</span>
             </div>
           </div>
+          <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution 10y: Small Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-small-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('SMALL')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution 10y: Micro Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-micro-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('MICRO')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution 10y: Large Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-large-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('LARGE')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution 10y: All Payments">
+              <span class="cite-stat-value" id="es-pros-pay-total-10y">0</span>
+              <span class="cite-stat-label">Total</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-apps-10y">0</span>
+              <span class="cite-stat-label">Apps w/ Findings</span>
+            </div>
+          </div>
         </div>
         <p class="text-muted" id="es-pros-pay-status" style="margin:0.25rem 0 0;font-size:0.8rem"></p>
       </div>
@@ -1132,7 +1261,8 @@ async function fetchProsecutionPayments() {
       timelines: {},
       payments_detail: [],
       summary: {},
-      kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0 },
+      kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0,
+              small_10y: 0, micro_10y: 0, large_10y: 0, total_10y: 0, apps_with_findings_10y: 0 },
       date_range: null,
       cache_stats: { from_cache: 0, freshly_analyzed: 0 },
     };
@@ -1163,6 +1293,10 @@ async function fetchProsecutionPayments() {
       merged.kpis.micro += k.micro || 0;
       merged.kpis.large += k.large || 0;
       merged.kpis.total += k.total || 0;
+      merged.kpis.small_10y += k.small_10y || 0;
+      merged.kpis.micro_10y += k.micro_10y || 0;
+      merged.kpis.large_10y += k.large_10y || 0;
+      merged.kpis.total_10y += k.total_10y || 0;
       // apps_with_findings must be re-counted from merged timelines
       // (app might appear in multiple batches — unlikely but safe)
 
@@ -1184,12 +1318,22 @@ async function fetchProsecutionPayments() {
 
     // Recount apps_with_findings from merged data
     const appsWithFindings = new Set();
+    const appsWithFindings10y = new Set();
+    const tenYrCutoff = new Date();
+    tenYrCutoff.setFullYear(tenYrCutoff.getFullYear() - 10);
+    const tenYrStr = tenYrCutoff.toISOString().slice(0, 10);
     for (const [an, tl] of Object.entries(merged.timelines)) {
-      if (tl.payments && tl.payments.some(p => p.status === 'SMALL' || p.status === 'MICRO')) {
-        appsWithFindings.add(an);
+      if (tl.payments) {
+        for (const p of tl.payments) {
+          if (p.status === 'SMALL' || p.status === 'MICRO') {
+            appsWithFindings.add(an);
+            if (p.d && p.d >= tenYrStr) appsWithFindings10y.add(an);
+          }
+        }
       }
     }
     merged.kpis.apps_with_findings = appsWithFindings.size;
+    merged.kpis.apps_with_findings_10y = appsWithFindings10y.size;
 
     // Store globally for sparkline injection
     window._prosecutionData = merged;
@@ -1204,6 +1348,11 @@ async function fetchProsecutionPayments() {
     setKpi('es-pros-pay-large', merged.kpis.large);
     setKpi('es-pros-pay-total', merged.kpis.total);
     setKpi('es-pros-pay-apps', merged.kpis.apps_with_findings);
+    setKpi('es-pros-pay-small-10y', merged.kpis.small_10y || 0);
+    setKpi('es-pros-pay-micro-10y', merged.kpis.micro_10y || 0);
+    setKpi('es-pros-pay-large-10y', merged.kpis.large_10y || 0);
+    setKpi('es-pros-pay-total-10y', merged.kpis.total_10y || 0);
+    setKpi('es-pros-pay-apps-10y', merged.kpis.apps_with_findings_10y || 0);
     if (kpisEl) kpisEl.style.display = '';
 
     // Set data-prospay on table rows (comma-separated statuses)
@@ -1285,7 +1434,8 @@ function renderProsecutionSummaryTable(data) {
           <thead><tr>
             <th data-sort-key="0">Year</th>`;
   codes.forEach((c, i) => {
-    html += `<th data-sort-key="${i + 1}" style="text-align:right">${escHtml(c)}</th>`;
+    const desc = PROS_PAY_DESCRIPTIONS[c] || c;
+    html += `<th data-sort-key="${i + 1}" style="text-align:right" title="${escHtml(desc)}">${escHtml(c)}</th>`;
   });
   html += `<th style="text-align:right;font-weight:700">Total</th></tr></thead><tbody>`;
 
@@ -1355,7 +1505,7 @@ function renderProsecutionDetailTable(data) {
     html += `<tr>
       <td>${escHtml(d.application_number || '')}</td>
       <td>${escHtml(d.event_date || '')}</td>
-      <td>${escHtml(d.event_code || '')}</td>
+      <td title="${escHtml(PROS_PAY_DESCRIPTIONS[d.event_code] || d.event_code || '')}">${escHtml(d.event_code || '')}</td>
       <td>${escHtml(d.event_description || '')}</td>
       <td>${statusBadge(d.claimed_status)}</td>
       <td>${escHtml(d.origin_code || '')}</td>
