@@ -58,6 +58,7 @@ function classifyEvent(code) {
   if (code === 'GRNT') return 'grant';
   if (code.startsWith('REM')) return 'reminder';
   if (code === 'ASPN') return 'attorney';
+  if (code === 'LITG') return 'litigation';
   return 'other';
 }
 
@@ -124,6 +125,12 @@ function svgBriefcase() {
     + '<rect x="1" y="5" width="12" height="8" rx="1.5"/>'
     + '<path d="M5,5 L5,3.5 A1.5,1.5 0 0 1 9,3.5 L9,5" fill="none" stroke="currentColor" stroke-width="1.5"/>'
     + '<line x1="1" y1="9" x2="13" y2="9" stroke="white" stroke-width="1"/>'
+    + '</svg>';
+}
+
+function svgStar() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<polygon points="7,1 8.8,5.3 13.4,5.8 10,9 11,13.5 7,11.2 3,13.5 4,9 0.6,5.8 5.2,5.3"/>'
     + '</svg>';
 }
 
@@ -265,6 +272,9 @@ function renderPatentTimeline(data) {
         marker.style.left = pct + '%';
         marker.style.backgroundColor = '#92400e';
         marker.title = `${ev.c} \u2014 ${ev.d}`;
+      } else if (cat === 'litigation') {
+        marker = createIconEl(svgStar, '#d4a017', pct, ev);
+        marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
       } else if (cat.startsWith('trans_to_')) {
         marker = document.createElement('div');
         marker.className = 'es-microchart-dot-trans';
@@ -578,6 +588,17 @@ function renderApplicantPortfolio(data) {
         </div>
       </div>
       <p class="text-muted" style="margin:0.5rem 0 0;font-size:0.8rem">Owned = Filed + Acquired \u2212 Divested \u2212 Expired &nbsp;|&nbsp; KPIs reflect only events during the entity's ownership period</p>
+
+      <!-- Litigation KPI (populated asynchronously) -->
+      <div id="es-litigation-kpis" style="display:none;margin-top:1rem">
+        <div class="cite-summary-grid">
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-litigated-count">\u2026</span>
+            <span class="cite-stat-label">Litigated</span>
+          </div>
+        </div>
+        <p class="text-muted" id="es-litigation-status" style="margin:0.25rem 0 0;font-size:0.8rem">Checking litigation history\u2026</p>
+      </div>
     </div>
 
     <!-- Prosecution Phase -->
@@ -720,7 +741,7 @@ function renderApplicantPortfolio(data) {
           <th data-sort-key="0">Patent #</th>
           <th data-sort-key="1">App #</th>
           <th data-sort-key="2">Grant Date</th>
-          <th>Events</th>
+          <th class="es-events-hdr">Events</th>
           <th data-sort-key="4">Prosecution</th>
           <th data-sort-key="5">Post-Grant First</th>
           <th data-sort-key="6">Post-Grant Current</th>
@@ -774,6 +795,59 @@ function renderApplicantPortfolio(data) {
       filterPatentTable(el.dataset.filter, el.dataset.label, el);
     });
   });
+
+  // Fire async litigation lookup for all granted patents
+  const grantedPatents = data.results
+    .filter(r => r.patent_number)
+    .map(r => r.patent_number);
+  if (grantedPatents.length > 0) {
+    fetchLitigationData(grantedPatents);
+  }
+}
+
+// ── Litigation Data (async, non-blocking) ──────────────────────
+
+async function fetchLitigationData(patentNumbers) {
+  const kpiSection = document.getElementById('es-litigation-kpis');
+  const countEl = document.getElementById('es-litigated-count');
+  const statusEl = document.getElementById('es-litigation-status');
+  if (!kpiSection) return;
+  kpiSection.style.display = '';
+
+  try {
+    const data = await apiPost('/api/litigation/lookup', {
+      patent_numbers: patentNumbers,
+    });
+
+    // Store for micro chart injection
+    window._litigationData = data.litigated_patents || {};
+
+    const litigatedCount = data.litigated_count || 0;
+    countEl.innerHTML = litigatedCount
+      ? `<span class="kpi-clickable" data-filter="litigation:litigated" data-label="Litigated Patents">${litigatedCount.toLocaleString()}</span>`
+      : '0';
+    statusEl.textContent = `${data.from_cache || 0} from cache, ${data.freshly_queried || 0} freshly queried`;
+
+    // Set data-litigated on table rows
+    const tbl = document.getElementById('es-app-table');
+    if (tbl) {
+      tbl.querySelectorAll('tbody tr').forEach(row => {
+        const pn = row.dataset.pn;
+        if (pn && window._litigationData[pn]) {
+          row.dataset.litigated = '1';
+        }
+      });
+    }
+
+    // Wire clickable KPI
+    kpiSection.querySelectorAll('.kpi-clickable').forEach(el => {
+      el.addEventListener('click', () => {
+        filterPatentTable(el.dataset.filter, el.dataset.label, el);
+      });
+    });
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
 }
 
 // ── Patent Table Filtering (for clickable KPIs) ─────────────────
@@ -838,6 +912,8 @@ function filterPatentTable(filterSpec, label, clickedEl) {
       else if (code === 'filed_pending') match = isPending && !isAcquired;
       else if (code === 'acquired_pending') match = isPending && isAcquired;
       else if (code === 'divested_pending') match = isPending && isDivested;
+    } else if (field === 'litigation') {
+      if (codes.includes('litigated')) match = row.dataset.litigated === '1';
     }
     row.style.display = match ? '' : 'none';
     if (match) {
@@ -934,6 +1010,19 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       } else {
         if (r.date_range.min < data.date_range.min) data.date_range.min = r.date_range.min;
         if (r.date_range.max > data.date_range.max) data.date_range.max = r.date_range.max;
+      }
+    }
+
+    // Inject litigation events into timelines (if loaded)
+    if (window._litigationData) {
+      for (const [pn, cases] of Object.entries(window._litigationData)) {
+        if (!data.timelines[pn]) continue;
+        for (const c of cases) {
+          if (c.filed_date) {
+            data.timelines[pn].push({ d: c.filed_date, c: 'LITG', _case: c });
+          }
+        }
+        data.timelines[pn].sort((a, b) => a.d.localeCompare(b.d));
       }
     }
 
@@ -1037,6 +1126,9 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
           marker.style.left = pct + '%';
           marker.style.backgroundColor = '#92400e';
           marker.title = `${ev.c} \u2014 ${ev.d}`;
+        } else if (cat === 'litigation') {
+          marker = createIconEl(svgStar, '#d4a017', pct, ev);
+          marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
         } else if (cat.startsWith('trans_to_')) {
           // Transitions: gray dot on the line to mark the event
           marker = document.createElement('div');
@@ -1136,6 +1228,12 @@ function showMicroChartLegend() {
     item.innerHTML = `<span class="es-microchart-legend-dot" style="background:${color}"></span>${escHtml(label)}`;
     legend.appendChild(item);
   }
+
+  // Litigation star
+  const litItem = document.createElement('span');
+  litItem.className = 'es-microchart-legend-item';
+  litItem.innerHTML = `<span class="es-microchart-legend-icon" style="color:#d4a017">${svgStar()}</span>Litigation`;
+  legend.appendChild(litItem);
 
   legend.classList.remove('hidden');
 }

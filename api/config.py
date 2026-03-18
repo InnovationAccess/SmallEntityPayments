@@ -108,5 +108,13 @@ class Settings:
     def sec_leads_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.sec_leads_results"
 
+    @property
+    def patent_litigation_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_litigation"
+
+    @property
+    def patent_litigation_cache_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.patent_litigation_cache"
+
 
 settings = Settings()

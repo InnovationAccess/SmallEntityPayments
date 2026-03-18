@@ -1132,6 +1132,25 @@ textarea { resize: vertical; }
   color: #4338ca;
 }
 
+/* ----- Entity Status table layout ----- */
+/* Non-Events columns: shrink to fit content */
+#es-app-table th,
+#es-app-table td {
+  white-space: nowrap;
+  width: 1%;
+}
+/* Events column: fill remaining space */
+#es-app-table .es-events-cell,
+#es-app-table th.es-events-hdr {
+  width: 99%;
+  white-space: normal;
+}
+/* Right breathing room on last column */
+#es-app-table th:last-child,
+#es-app-table td:last-child {
+  padding-right: 1.25rem;
+}
+
 /* ----- Micro chart sparkline timelines ----- */
 .es-events-cell {
   min-width: 200px;
