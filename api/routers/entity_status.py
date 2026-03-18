@@ -63,6 +63,42 @@ class BulkTimelineRequest(BaseModel):
     patent_numbers: List[str]
 
 
+class ProsecutionTimelinesRequest(BaseModel):
+    application_numbers: List[str]
+
+
+# ── Prosecution Payment Analysis Constants ────────────────────────
+
+# Status-change event codes → new entity status
+_PROS_STATUS_CODES = {
+    # → SMALL
+    'SES': 'SMALL', 'SMAL': 'SMALL', 'P013': 'SMALL', 'MP013': 'SMALL',
+    'MSML': 'SMALL', 'NOSE': 'SMALL', 'MRNSME': 'SMALL',
+    # → MICRO
+    'MICR': 'MICRO', 'MENC': 'MICRO', 'PMRIA': 'MICRO', 'MPMRIA': 'MICRO',
+    # → LARGE
+    'BIG.': 'LARGE', 'P014': 'LARGE', 'MP014': 'LARGE',
+}
+
+# All 102 prosecution payment event codes
+_PROS_PAYMENT_CODES = [
+    'A.I.', 'A.LA', 'A.NQ', 'A.NR', 'A.PE', 'A371', 'AABR', 'ABN/',
+    'ABN6', 'ABN9', 'ABNF', 'ACKNAHA', 'ADDDWRG', 'ADDFLFEE', 'ADDSPEC',
+    'AFNE', 'AP.B', 'AP.C', 'AP.C3', 'AP/A', 'APBD', 'APBI', 'APBR',
+    'APCA', 'APCD', 'APCP', 'APCR', 'APE2', 'APEA', 'APFC', 'APHT',
+    'APND', 'APNH', 'APNH.CA', 'APNH.CO', 'APNH.MI', 'APNH.TX',
+    'APNH.VA', 'APOH', 'APRD', 'APRR', 'ARBP', 'BRCE', 'C610', 'C9DE',
+    'C9GR', 'CPA-AMD', 'DIST', 'FEE.', 'FLFEE', 'FRCE', 'IDS.',
+    'IDSPTA', 'IFEE', 'IFEEHA', 'IRCE', 'J521', 'JA94', 'JA95', 'JS13',
+    'MABN6', 'MAPHT', 'MCPA-AMD', 'MODPD28', 'MODPD33', 'MP005',
+    'MP020', 'MQRCE', 'MRAPD', 'MRAPS', 'MRXEAS', 'MRXG.', 'MRXTG',
+    'MSML', 'N/AP', 'N/AP-NOA', 'N084', 'NOIFIBHA', 'ODPD28', 'ODPD33',
+    'ODPET4', 'P003', 'P005', 'P007', 'P010', 'P012', 'P020', 'P131',
+    'P138', 'PFP', 'PMFP', 'QRCE', 'RCEX', 'RETF', 'RVIFEEHA',
+    'RXIDS.R', 'RXRQ/T', 'RXSAPB', 'RXXT/G', 'TDP', 'VFEE', 'XT/G',
+]
+
+
 # ── Endpoints ─────────────────────────────────────────────────────
 
 @router.get("/summary")
@@ -421,6 +457,229 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
             "min": _fmt_date(global_min),
             "max": _fmt_date(global_max),
         } if global_min and global_max else None,
+    }
+
+
+@router.post("/prosecution-timelines")
+def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any]:
+    """Prosecution payment analysis: status segments + payment events.
+
+    For each application, builds:
+      1. Status segments — date ranges for each entity status period
+         (LARGE/SMALL/MICRO) derived from 14 status-change codes.
+      2. Payment events — all 102 prosecution fee payment events,
+         each classified by which status segment its date falls into.
+
+    Max 200 applications per request.
+    """
+    if not req.application_numbers:
+        return {"timelines": {}, "date_range": None,
+                "payments_detail": [], "summary": {},
+                "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
+                         "apps_with_findings": 0}}
+
+    an_list = req.application_numbers[:200]
+    params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
+
+    # ── Query A: Status-change events (for building segments) ────
+    status_codes = list(_PROS_STATUS_CODES.keys())
+    status_in = ", ".join(f"'{c}'" for c in status_codes)
+    seg_sql = f"""
+    SELECT application_number, event_date, event_code
+    FROM `{settings.pfw_transactions_table}`
+    WHERE application_number IN UNNEST(@an_list)
+      AND event_code IN ({status_in})
+    ORDER BY application_number, event_date ASC
+    """
+
+    # ── Query B: Payment events ──────────────────────────────────
+    pay_in = ", ".join(f"'{c}'" for c in _PROS_PAYMENT_CODES)
+    pay_sql = f"""
+    SELECT application_number, event_date, event_code, event_description
+    FROM `{settings.pfw_transactions_table}`
+    WHERE application_number IN UNNEST(@an_list)
+      AND event_code IN ({pay_in})
+    ORDER BY application_number, event_date ASC
+    """
+
+    # ── Query C: Filing dates ─────────────────────────────────────
+    filing_sql = f"""
+    SELECT application_number, filing_date
+    FROM `{settings.patent_table}`
+    WHERE application_number IN UNNEST(@an_list)
+    """
+
+    # Run all three queries
+    seg_rows = bq_service.run_query(seg_sql, params)
+    pay_rows = bq_service.run_query(pay_sql, params)
+    filing_rows = bq_service.run_query(filing_sql, params)
+
+    # Build filing date lookup
+    filing_dates: Dict[str, _date] = {}
+    for r in filing_rows:
+        if r.get("filing_date"):
+            filing_dates[r["application_number"]] = r["filing_date"]
+
+    # ── Build status segments per application ─────────────────────
+    # Group status-change events by application
+    seg_by_app: Dict[str, list] = {}
+    for r in seg_rows:
+        an = r["application_number"]
+        seg_by_app.setdefault(an, []).append({
+            "date": r["event_date"],
+            "code": r["event_code"],
+            "status": _PROS_STATUS_CODES.get(r["event_code"], "LARGE"),
+        })
+
+    # For each application, build ordered segments
+    today = _date.today()
+    timelines: Dict[str, dict] = {}
+    global_min = None
+    global_max = None
+
+    def _update_range(d):
+        nonlocal global_min, global_max
+        if d:
+            if global_min is None or d < global_min:
+                global_min = d
+            if global_max is None or d > global_max:
+                global_max = d
+
+    for an in an_list:
+        filing_d = filing_dates.get(an)
+        changes = seg_by_app.get(an, [])
+        segments = []
+
+        if not changes:
+            # No status changes → entire period is LARGE (default)
+            start = filing_d or today
+            segments.append({
+                "status": "LARGE",
+                "start": _fmt_date(start),
+                "end": None,
+                "trigger": None,
+            })
+            _update_range(start)
+        else:
+            # First implicit segment: LARGE from filing to first change
+            first_change_date = changes[0]["date"]
+            seg_start = filing_d or first_change_date
+            if seg_start < first_change_date:
+                segments.append({
+                    "status": "LARGE",
+                    "start": _fmt_date(seg_start),
+                    "end": _fmt_date(first_change_date),
+                    "trigger": None,
+                })
+            _update_range(seg_start)
+
+            # Each status change starts a new segment
+            for i, ch in enumerate(changes):
+                end_date = changes[i + 1]["date"] if i + 1 < len(changes) else None
+                segments.append({
+                    "status": ch["status"],
+                    "start": _fmt_date(ch["date"]),
+                    "end": _fmt_date(end_date),
+                    "trigger": ch["code"],
+                })
+                _update_range(ch["date"])
+                if end_date:
+                    _update_range(end_date)
+
+        timelines[an] = {"segments": segments, "payments": []}
+
+    # ── Classify payment events by status segment ─────────────────
+    # Group payments by application
+    pay_by_app: Dict[str, list] = {}
+    for r in pay_rows:
+        an = r["application_number"]
+        pay_by_app.setdefault(an, []).append({
+            "date": r["event_date"],
+            "code": r["event_code"],
+            "desc": r.get("event_description", ""),
+        })
+
+    payments_detail = []
+    summary: Dict[str, Dict[str, int]] = {}  # year → {code: count}
+    kpi_small = 0
+    kpi_micro = 0
+    kpi_large = 0
+    apps_with_findings: set = set()
+
+    for an in an_list:
+        if an not in timelines:
+            continue
+        tl = timelines[an]
+        payments = pay_by_app.get(an, [])
+
+        for pay in payments:
+            pay_date = pay["date"]
+            _update_range(pay_date)
+
+            # Determine status at payment date by finding the segment
+            pay_status = "LARGE"  # default
+            origin_code = None
+            origin_date = None
+            for seg in tl["segments"]:
+                seg_start = _date.fromisoformat(seg["start"]) if seg["start"] else None
+                seg_end = _date.fromisoformat(seg["end"]) if seg["end"] else None
+                if seg_start and pay_date >= seg_start:
+                    if seg_end is None or pay_date < seg_end:
+                        pay_status = seg["status"]
+                        origin_code = seg["trigger"]
+                        origin_date = seg["start"]
+                        break
+
+            tl["payments"].append({
+                "d": _fmt_date(pay_date),
+                "c": pay["code"],
+                "desc": pay["desc"],
+                "status": pay_status,
+            })
+
+            # KPI counting
+            if pay_status == "SMALL":
+                kpi_small += 1
+                apps_with_findings.add(an)
+            elif pay_status == "MICRO":
+                kpi_micro += 1
+                apps_with_findings.add(an)
+            else:
+                kpi_large += 1
+
+            # Summary pivot: year × code (all payments)
+            yr = str(pay_date.year) if hasattr(pay_date, "year") else "Unknown"
+            if yr not in summary:
+                summary[yr] = {}
+            summary[yr][pay["code"]] = summary[yr].get(pay["code"], 0) + 1
+
+            # Detail record for Small + Micro payments
+            if pay_status in ("SMALL", "MICRO"):
+                payments_detail.append({
+                    "application_number": an,
+                    "event_date": _fmt_date(pay_date),
+                    "event_code": pay["code"],
+                    "event_description": pay["desc"],
+                    "claimed_status": pay_status,
+                    "origin_code": origin_code,
+                    "origin_date": origin_date,
+                })
+
+    return {
+        "timelines": timelines,
+        "date_range": {
+            "min": _fmt_date(global_min),
+            "max": _fmt_date(global_max),
+        } if global_min and global_max else None,
+        "payments_detail": payments_detail,
+        "summary": summary,
+        "kpis": {
+            "small": kpi_small,
+            "micro": kpi_micro,
+            "large": kpi_large,
+            "total": kpi_small + kpi_micro + kpi_large,
+            "apps_with_findings": len(apps_with_findings),
+        },
     }
 
 
