@@ -231,14 +231,19 @@ def _update_extraction_status(
     extraction: dict | None,
     status: str,
 ):
-    """Update the extraction_status and data for an existing row."""
+    """Update or insert extraction data for a document.
+
+    Tries UPDATE first. If the row is in the BQ streaming buffer (blocks
+    UPDATE for ~30 min after streaming insert), falls back to INSERT of a
+    new row. The extraction-data endpoint picks the latest row per doc.
+    """
     now = datetime.now(timezone.utc).isoformat()
 
     if extraction:
         fees = extraction.get("fees", [])
         fees_json = json.dumps(fees) if isinstance(fees, list) else "[]"
 
-        query = """
+        update_query = """
         UPDATE `uspto-data-app.uspto_data.invoice_extractions`
         SET extraction_status = @status,
             entity_status = @entity_status,
@@ -250,7 +255,7 @@ def _update_extraction_status(
             raw_response = @raw_response
         WHERE application_number = @app AND gcs_path = @gcs_path
         """
-        params = [
+        update_params = [
             bigquery.ScalarQueryParameter("status", "STRING", status),
             bigquery.ScalarQueryParameter("entity_status", "STRING", extraction.get("entity_status")),
             bigquery.ScalarQueryParameter("fees_json", "STRING", fees_json),
@@ -263,18 +268,69 @@ def _update_extraction_status(
             bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
         ]
     else:
-        query = """
+        update_query = """
         UPDATE `uspto-data-app.uspto_data.invoice_extractions`
         SET extraction_status = @status, extracted_at = @now
         WHERE application_number = @app AND gcs_path = @gcs_path
         """
-        params = [
+        update_params = [
             bigquery.ScalarQueryParameter("status", "STRING", status),
             bigquery.ScalarQueryParameter("now", "STRING", now),
             bigquery.ScalarQueryParameter("app", "STRING", app_number),
             bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
         ]
 
+    try:
+        job_config = bigquery.QueryJobConfig(query_parameters=update_params)
+        bq_client.query(update_query, job_config=job_config).result()
+    except Exception as e:
+        if "streaming buffer" in str(e).lower():
+            # Row is in streaming buffer — fall back to INSERT a new row
+            logger.info("Streaming buffer for %s, inserting new row instead", gcs_path)
+            _insert_extraction_row(bq_client, app_number, gcs_path, extraction, status, now)
+        else:
+            raise
+
+
+def _insert_extraction_row(
+    bq_client: bigquery.Client,
+    app_number: str,
+    gcs_path: str,
+    extraction: dict | None,
+    status: str,
+    now: str,
+):
+    """Insert a new extraction row (fallback when UPDATE fails on streaming buffer)."""
+    fees = []
+    if extraction:
+        fees = extraction.get("fees", [])
+    fees_json = json.dumps(fees) if isinstance(fees, list) else "[]"
+
+    query = """
+    INSERT INTO `uspto-data-app.uspto_data.invoice_extractions`
+      (application_number, gcs_path, extraction_status, entity_status, fees_json,
+       total_amount, extraction_method, extraction_model, extracted_at, raw_response)
+    VALUES
+      (@app, @gcs_path, @status, @entity_status, @fees_json,
+       @total_amount, @method, @model, @now, @raw_response)
+    """
+    params = [
+        bigquery.ScalarQueryParameter("app", "STRING", app_number),
+        bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
+        bigquery.ScalarQueryParameter("status", "STRING", status),
+        bigquery.ScalarQueryParameter("entity_status", "STRING",
+                                      extraction.get("entity_status") if extraction else None),
+        bigquery.ScalarQueryParameter("fees_json", "STRING", fees_json),
+        bigquery.ScalarQueryParameter("total_amount", "FLOAT64",
+                                      extraction.get("total_amount") if extraction else None),
+        bigquery.ScalarQueryParameter("method", "STRING",
+                                      extraction.get("extraction_method", "") if extraction else ""),
+        bigquery.ScalarQueryParameter("model", "STRING",
+                                      extraction.get("extraction_model", "") if extraction else ""),
+        bigquery.ScalarQueryParameter("now", "STRING", now),
+        bigquery.ScalarQueryParameter("raw_response", "STRING",
+                                      extraction.get("raw_response", "") if extraction else ""),
+    ]
     job_config = bigquery.QueryJobConfig(query_parameters=params)
     bq_client.query(query, job_config=job_config).result()
 

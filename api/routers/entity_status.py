@@ -1822,7 +1822,9 @@ def get_extraction_data(req: ExtractionDataRequest) -> Dict[str, Any]:
 
     client = bigquery.Client(location="us-west1")
 
-    # Fetch all extracted records for these applications
+    # Fetch all extracted records for these applications.
+    # Include rows with extraction_status='extracted' OR NULL (calibration data).
+    # Deduplicate by gcs_path: pick the row with the latest extracted_at.
     query = """
     SELECT
       application_number,
@@ -1835,9 +1837,14 @@ def get_extraction_data(req: ExtractionDataRequest) -> Dict[str, Any]:
       gcs_path,
       extraction_method,
       extraction_status
-    FROM `uspto-data-app.uspto_data.invoice_extractions`
-    WHERE application_number IN UNNEST(@apps)
-      AND extraction_status = 'extracted'
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY gcs_path ORDER BY extracted_at DESC) as rn
+      FROM `uspto-data-app.uspto_data.invoice_extractions`
+      WHERE application_number IN UNNEST(@apps)
+        AND (extraction_status = 'extracted' OR (extraction_status IS NULL AND total_amount IS NOT NULL))
+    )
+    WHERE rn = 1
     ORDER BY application_number, mail_date DESC
     """
     job_config = bigquery.QueryJobConfig(
