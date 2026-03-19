@@ -649,19 +649,13 @@ def update_pipeline_status(
     errors_json: str = "[]",
     completed: bool = False,
 ):
-    """Update the pipeline status row for real-time monitoring."""
-    now = datetime.now(timezone.utc).isoformat()
+    """Append a pipeline status row for real-time monitoring.
 
-    # Delete existing row for this entity, then insert new one
-    delete_query = """
-    DELETE FROM `uspto-data-app.uspto_data.invoice_pipeline_status`
-    WHERE entity_name = @entity
+    Append-only design: BigQuery streaming buffer blocks DELETE/UPDATE on
+    recently-inserted rows. The status endpoint queries ORDER BY updated_at
+    DESC LIMIT 1, so the latest row always wins.
     """
-    from google.cloud import bigquery as bq
-    job_config = bq.QueryJobConfig(
-        query_parameters=[bq.ScalarQueryParameter("entity", "STRING", entity_name)]
-    )
-    bq_client.query(delete_query, job_config=job_config).result()
+    now = datetime.now(timezone.utc).isoformat()
 
     row = {
         "entity_name": entity_name,
