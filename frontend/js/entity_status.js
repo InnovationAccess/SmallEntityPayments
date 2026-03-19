@@ -154,6 +154,28 @@ const _PROS_TO_SMALL = new Set(['SES','SMAL','P013','MP013','MSML','NOSE','MRNSM
 const _PROS_TO_MICRO = new Set(['MICR','MENC','PMRIA','MPMRIA']);
 const _PROS_TO_LARGE = new Set(['BIG.','P014','MP014']);
 
+// Human-readable descriptions for status-change events (used in yellow dot tooltips)
+const _STATUS_CHANGE_DESC = {
+  'SES': 'Small entity status established',
+  'SMAL': 'Small entity declaration',
+  'P013': 'Small entity status established',
+  'MP013': 'Small entity status established',
+  'MSML': 'Small entity status \u2014 processing fee',
+  'NOSE': 'Notice of small entity status',
+  'MRNSME': 'Notice of small entity status',
+  'MICR': 'Micro entity status declared',
+  'MENC': 'Micro entity certification',
+  'PMRIA': 'Micro entity status established',
+  'MPMRIA': 'Micro entity status established',
+  'BIG.': 'Large entity status declared',
+  'P014': 'Large entity status established',
+  'MP014': 'Large entity status established',
+  'STOL': 'Status change: Small \u2192 Large',
+  'LTOS': 'Status change: Large \u2192 Small',
+  'MTOS': 'Status change: Micro \u2192 Small',
+  'STOM': 'Status change: Small \u2192 Micro',
+};
+
 function classifyEvent(code) {
   if (!code) return 'other';
   if (code.startsWith('M1') || code.startsWith('F17')) return 'large_payment';
@@ -394,13 +416,14 @@ function renderPatentTimeline(data) {
       } else if (cat === 'litigation') {
         marker = createIconEl(svgStar, '#d4a017', pct, ev);
         marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
-      } else if (cat.startsWith('trans_to_')) {
+      } else if (cat.startsWith('trans_to_') || cat.startsWith('decl_')) {
+        // Status-change events: yellow dot with description
         marker = document.createElement('div');
-        marker.className = 'es-microchart-dot-trans';
+        marker.className = 'es-microchart-dot-sm';
         marker.style.left = pct + '%';
-        marker.title = `${ev.c} \u2014 ${ev.d}`;
-      } else if (cat.startsWith('decl_')) {
-        continue;
+        marker.style.backgroundColor = '#eab308'; // yellow
+        const desc = _STATUS_CHANGE_DESC[ev.c] || ev.c;
+        marker.title = `${desc} (${ev.c}) \u2014 ${ev.d}`;
       } else {
         marker = document.createElement('div');
         marker.className = 'es-microchart-other';
@@ -1783,10 +1806,16 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
         if (pn && app) pnToApp[pn] = app;
       });
 
+      // Store prosecution segments per patent for phase-aware line coloring
+      if (!data._prosSegmentsByPn) data._prosSegmentsByPn = {};
+
       for (const [pn, app] of Object.entries(pnToApp)) {
         const prosTimeline = window._prosecutionData.timelines[app];
         if (!prosTimeline || !prosTimeline.payments) continue;
         if (!data.timelines[pn]) data.timelines[pn] = [];
+
+        // Save prosecution segments for this patent
+        data._prosSegmentsByPn[pn] = prosTimeline.segments || [];
 
         for (const p of prosTimeline.payments) {
           data.timelines[pn].push({
@@ -1798,7 +1827,7 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
           });
         }
 
-        // Also inject prosecution status-change events for line coloring
+        // Also inject prosecution status-change events for yellow dot markers
         for (const seg of prosTimeline.segments) {
           if (seg.trigger) {
             data.timelines[pn].push({
@@ -1852,29 +1881,71 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       const track = document.createElement('div');
       track.className = 'es-microchart-track';
 
-      // ── Build colored status line ──
-      const initColor = inferInitialColor(events);
-      let currentColor = initColor;
-      const changePoints = [];
+      // ── Build colored status line (phase-aware: prosecution vs post-grant) ──
+      const prosSegs = data._prosSegmentsByPn && data._prosSegmentsByPn[pn];
+      const prosStatusToColor = s => s === 'SMALL' ? STATUS_COLORS.small
+        : s === 'MICRO' ? STATUS_COLORS.micro : STATUS_COLORS.large;
+      const dateToPct = d => clampPct(((new Date(d).getTime() - minDate.getTime()) / totalMs) * 100);
 
-      // Find expiration point — line stops there
+      // Find grant and expiration dates
+      let grantDate = null, grantPct = null;
       let endPct = 100;
       for (const ev of events) {
+        if (ev.c === 'GRNT' && !grantDate) {
+          grantDate = new Date(ev.d);
+          grantPct = dateToPct(ev.d);
+        }
         if (ev.c === 'EXP.') {
-          const expDate = new Date(ev.d);
-          endPct = clampPct(((expDate.getTime() - minDate.getTime()) / totalMs) * 100);
-          break;
+          endPct = dateToPct(ev.d);
         }
       }
 
-      for (const ev of events) {
-        const newColor = statusColorForEvent(ev.c);
-        if (newColor && newColor !== currentColor) {
-          const evDate = new Date(ev.d);
-          const pct = clampPct(((evDate.getTime() - minDate.getTime()) / totalMs) * 100);
-          if (pct >= endPct) break; // don't add change points past expiration
-          changePoints.push({ pct, color: newColor });
-          currentColor = newColor;
+      const changePoints = [];
+      let initColor;
+
+      if (prosSegs && prosSegs.length > 0) {
+        // Phase-aware: prosecution segments drive pre-grant, post-grant events drive post-grant
+        initColor = prosStatusToColor(prosSegs[0].status);
+
+        // Pre-grant change points from prosecution segments
+        for (let i = 1; i < prosSegs.length; i++) {
+          const seg = prosSegs[i];
+          const pct = dateToPct(seg.start);
+          if (grantPct !== null && pct >= grantPct) break;
+          if (pct >= endPct) break;
+          changePoints.push({ pct, color: prosStatusToColor(seg.status), code: seg.trigger });
+        }
+
+        // Post-grant: only use post-grant status events (M1/M2/M3, STOL/LTOS/MTOS/STOM)
+        const lastProsColor = changePoints.length > 0
+          ? changePoints[changePoints.length - 1].color : initColor;
+        let currentPostColor = lastProsColor;
+        for (const ev of events) {
+          if (grantDate && new Date(ev.d) < grantDate) continue;
+          const cat = classifyEvent(ev.c);
+          let newColor = null;
+          if (cat === 'large_payment' || cat === 'trans_to_large') newColor = STATUS_COLORS.large;
+          else if (cat === 'small_payment' || cat === 'trans_to_small') newColor = STATUS_COLORS.small;
+          else if (cat === 'micro_payment' || cat === 'trans_to_micro') newColor = STATUS_COLORS.micro;
+          if (newColor && newColor !== currentPostColor) {
+            const pct = dateToPct(ev.d);
+            if (pct >= endPct) break;
+            changePoints.push({ pct, color: newColor, code: ev.c });
+            currentPostColor = newColor;
+          }
+        }
+      } else {
+        // No prosecution data: use only post-grant events (original behavior)
+        initColor = inferInitialColor(events);
+        let currentColor = initColor;
+        for (const ev of events) {
+          const newColor = statusColorForEvent(ev.c);
+          if (newColor && newColor !== currentColor) {
+            const pct = dateToPct(ev.d);
+            if (pct >= endPct) break;
+            changePoints.push({ pct, color: newColor, code: ev.c });
+            currentColor = newColor;
+          }
         }
       }
 
@@ -1930,15 +2001,14 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
         } else if (cat === 'litigation') {
           marker = createIconEl(svgStar, '#d4a017', pct, ev);
           marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
-        } else if (cat.startsWith('trans_to_')) {
-          // Transitions: gray dot on the line to mark the event
+        } else if (cat.startsWith('trans_to_') || cat.startsWith('decl_')) {
+          // Status-change events: yellow dot with description
           marker = document.createElement('div');
-          marker.className = 'es-microchart-dot-trans';
+          marker.className = 'es-microchart-dot-sm';
           marker.style.left = pct + '%';
-          marker.title = `${ev.c} \u2014 ${ev.d}`;
-        } else if (cat.startsWith('decl_')) {
-          // Declarations are shown by the line color change — no marker
-          continue;
+          marker.style.backgroundColor = '#eab308'; // yellow
+          const desc = _STATUS_CHANGE_DESC[ev.c] || ev.c;
+          marker.title = `${desc} (${ev.c}) \u2014 ${ev.d}`;
         } else {
           // Catch-all: small gray dot
           marker = document.createElement('div');
@@ -2011,10 +2081,10 @@ function showMicroChartLegend() {
   expItem.innerHTML = `<span class="es-microchart-legend-icon" style="color:${GRAY}">${svgExpired()}</span>Expired`;
   legend.appendChild(expItem);
 
-  // Transition dot (slightly larger, gray)
+  // Status change dot (yellow)
   const transItem = document.createElement('span');
   transItem.className = 'es-microchart-legend-item';
-  transItem.innerHTML = `<span class="es-microchart-legend-dot" style="background:#6b7280;width:9px;height:9px"></span>Transition`;
+  transItem.innerHTML = `<span class="es-microchart-legend-dot" style="background:#eab308;width:9px;height:9px"></span>Status Change`;
   legend.appendChild(transItem);
 
   // Small dot entries (grant + reminder + attorney)
