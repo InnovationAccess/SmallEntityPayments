@@ -99,7 +99,7 @@ export function showStatus(el, message, type = 'success') {
  * Usage:
  *   enableTableSorting(document.getElementById('my-table'));
  */
-export function enableTableSorting(tableEl) {
+export function enableTableSorting(tableEl, onSort) {
   if (!tableEl) return;
   const thead = tableEl.querySelector('thead');
   const tbody = tableEl.querySelector('tbody');
@@ -126,6 +126,12 @@ export function enableTableSorting(tableEl) {
       ths.forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
       if (sortDir !== 0) {
         th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
+      }
+
+      // If external sort callback provided, delegate to it
+      if (typeof onSort === 'function') {
+        onSort(sortDir === 0 ? null : colIdx, sortDir);
+        return;
       }
 
       // Sort rows

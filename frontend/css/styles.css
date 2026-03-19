@@ -1145,10 +1145,18 @@ textarea { resize: vertical; }
   width: 99%;
   white-space: normal;
 }
-/* Right breathing room on last column */
-#es-app-table th:last-child,
-#es-app-table td:last-child {
-  padding-right: 1.25rem;
+/* Right breathing room on Events column (so sparklines don't touch border) */
+#es-app-table .es-events-cell,
+#es-app-table th.es-events-hdr {
+  padding-right: 1.5rem !important;
+}
+
+/* Scroll sentinel (infinite scroll) */
+.es-scroll-sentinel {
+  padding: 0.75rem;
+  color: #6b7280;
+  font-size: 0.85rem;
+  text-align: center;
 }
 
 /* ----- Micro chart sparkline timelines ----- */

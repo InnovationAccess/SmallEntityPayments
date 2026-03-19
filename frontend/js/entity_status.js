@@ -38,6 +38,33 @@ const convArea        = document.getElementById('es-conv-results');
 const appArea         = document.getElementById('es-app-results');
 const statusMsg       = document.getElementById('es-status');
 
+// ── Portfolio State (pagination, sorting, filtering) ─────────────
+const PAGE_SIZE = 50;
+let _portfolioState = {
+  allResults: [],        // full result set from backend
+  filteredResults: [],   // after applying filter
+  currentOffset: 0,
+  sortColumn: null,      // field name
+  sortDirection: null,   // 'asc' or 'desc'
+  filterSpec: null,
+  filterLabel: null,
+  loading: false,
+  entityName: '',
+};
+
+// Map column indices (from data-sort-key) to result object field names
+const SORT_COL_MAP = {
+  0: 'patent_number',
+  1: 'application_number',
+  2: 'grant_date',
+  // 3: Events (not sortable)
+  4: 'prosecution_status',
+  5: 'post_grant_first',
+  6: 'post_grant_current',
+  7: 'status_changed',
+  8: '_ownership_sort',  // computed sort key
+};
+
 // ── Micro Chart: Event Classification & Icons ───────────────────
 
 const STATUS_COLORS = { large: '#ef4444', small: '#22c55e', micro: '#3b82f6' };
@@ -649,6 +676,253 @@ async function loadApplicantPortfolio() {
   }
 }
 
+// ── Portfolio Helpers: row building, filtering, sorting ──────────
+
+/** Build HTML for a single table row from a result object. */
+function buildResultRowHtml(r) {
+  const changedMark = r.status_changed
+    ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
+    : '';
+  let ownershipBadge;
+  if (r.divested) {
+    ownershipBadge = `<span class="es-badge es-badge--divested" title="Divested ${r.divested_date || ''}">Divested${r.divested_date ? ' ' + r.divested_date.slice(0, 10) : ''}</span>`;
+  } else if (r.acquired_via_assignment) {
+    ownershipBadge = `<span class="es-badge es-badge--acquired" title="Acquired via assignment ${r.acquired_date || ''}">Acquired${r.acquired_date ? ' ' + r.acquired_date.slice(0, 10) : ''}</span>`;
+  } else {
+    ownershipBadge = `<span class="es-badge es-badge--owned">Owned</span>`;
+  }
+  const rowStyle = r.divested ? ' style="opacity:0.6"' : '';
+  return `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-app="${escHtml(r.application_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}" data-expired="${r.expired ? '1' : ''}">
+    <td class="patent-number">${escHtml(r.patent_number || '')}</td>
+    <td>${escHtml(r.application_number || '')}</td>
+    <td>${escHtml(r.grant_date || '')}</td>
+    <td class="es-events-cell"></td>
+    <td>${statusBadge(r.prosecution_status)}</td>
+    <td>${statusBadge(r.post_grant_first)}</td>
+    <td>${statusBadge(r.post_grant_current)}</td>
+    <td>${changedMark}</td>
+    <td>${ownershipBadge}</td>
+  </tr>`;
+}
+
+/** Apply filter to an array of result objects. Returns filtered array. */
+function applyResultFilter(results, filterSpec) {
+  if (!filterSpec) return results;
+  const colonIdx = filterSpec.indexOf(':');
+  if (colonIdx < 0) return results;
+  const field = filterSpec.slice(0, colonIdx);
+  const codes = filterSpec.slice(colonIdx + 1).split(',');
+
+  return results.filter(r => {
+    if (field === 'mf') {
+      const mfTokens = (r.mf_events || '').split(' ');
+      return codes.some(c => mfTokens.includes(c));
+    } else if (field === 'pros') {
+      return codes.includes(r.prosecution_status);
+    } else if (field === 'pros10y') {
+      return codes.includes(r.prosecution_status_10y);
+    } else if (field === 'pgfirst') {
+      return codes.includes(r.post_grant_first);
+    } else if (field === 'pgcurrent') {
+      return codes.includes(r.post_grant_current);
+    } else if (field === 'ownership') {
+      if (codes.includes('divested')) return !!r.divested;
+      if (codes.includes('acquired')) return !!r.acquired_via_assignment;
+      return true;
+    } else if (field === 'portfolio') {
+      const code = codes[0];
+      const isGranted = !!r.patent_number;
+      const isPending = !isGranted;
+      const isDivested = !!r.divested;
+      const isAcquired = !!r.acquired_via_assignment;
+      const isExpired = !!r.expired;
+      if (code === 'filed_granted') return isGranted && !isAcquired;
+      if (code === 'acquired_granted') return isGranted && isAcquired;
+      if (code === 'divested_granted') return isGranted && isDivested;
+      if (code === 'expired_granted') return isGranted && !isDivested && isExpired;
+      if (code === 'filed_pending') return isPending && !isAcquired;
+      if (code === 'acquired_pending') return isPending && isAcquired;
+      if (code === 'divested_pending') return isPending && isDivested;
+      return true;
+    } else if (field === 'litigation') {
+      if (codes.includes('litigated')) {
+        const litData = window._litigationData;
+        return litData && !!litData[r.patent_number];
+      }
+      return true;
+    } else if (field === 'prospay') {
+      const pd = window._prosecutionData;
+      if (!pd || !pd.timelines || !pd.timelines[r.application_number]) return false;
+      const statuses = new Set();
+      for (const p of (pd.timelines[r.application_number].payments || [])) {
+        statuses.add(p.status);
+      }
+      return codes.some(c => statuses.has(c));
+    }
+    return true;
+  });
+}
+
+/** Sort an array of result objects by field name. Returns new sorted array. */
+function sortResults(results, fieldName, direction) {
+  if (!fieldName || !direction) return results;
+  const dir = direction === 'asc' ? 1 : -1;
+  const sorted = [...results];
+  sorted.sort((a, b) => {
+    let va = a[fieldName] ?? '';
+    let vb = b[fieldName] ?? '';
+    // Compute ownership sort key on the fly
+    if (fieldName === '_ownership_sort') {
+      va = a.divested ? '2_divested' : a.acquired_via_assignment ? '1_acquired' : '0_owned';
+      vb = b.divested ? '2_divested' : b.acquired_via_assignment ? '1_acquired' : '0_owned';
+    }
+    // Booleans
+    if (typeof va === 'boolean') va = va ? 1 : 0;
+    if (typeof vb === 'boolean') vb = vb ? 1 : 0;
+    // Numeric
+    const na = parseFloat(String(va).replace(/,/g, ''));
+    const nb = parseFloat(String(vb).replace(/,/g, ''));
+    if (!isNaN(na) && !isNaN(nb)) return (na - nb) * dir;
+    return String(va).localeCompare(String(vb), undefined, { numeric: true }) * dir;
+  });
+  return sorted;
+}
+
+/**
+ * Render a page of result rows into the table body.
+ * Appends to existing tbody (for infinite scroll).
+ * Also sets data-prospay and data-litigated from async data if available.
+ */
+function appendResultRows(rows) {
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+  const tbody = tbl.querySelector('tbody');
+  if (!tbody) return;
+
+  let html = '';
+  for (const r of rows) {
+    html += buildResultRowHtml(r);
+  }
+  tbody.insertAdjacentHTML('beforeend', html);
+
+  // Set async data attributes on new rows
+  const newTrs = Array.from(tbody.querySelectorAll('tr')).slice(-rows.length);
+  for (const tr of newTrs) {
+    const app = tr.dataset.app;
+    const pn = tr.dataset.pn;
+
+    // Prosecution payment status
+    if (window._prosecutionData && window._prosecutionData.timelines && app) {
+      const tl = window._prosecutionData.timelines[app];
+      if (tl) {
+        const statuses = new Set();
+        for (const p of (tl.payments || [])) statuses.add(p.status);
+        tr.dataset.prospay = [...statuses].join(',');
+      }
+    }
+    // Litigation
+    if (window._litigationData && pn && window._litigationData[pn]) {
+      tr.dataset.litigated = '1';
+    }
+  }
+
+  // Sync column visibility — hide td cells for columns hidden via column picker
+  const ths = tbl.querySelectorAll('thead th');
+  for (const tr of newTrs) {
+    for (let i = 0; i < ths.length; i++) {
+      if (ths[i].style.display === 'none' && tr.cells[i]) {
+        tr.cells[i].style.display = 'none';
+      }
+    }
+  }
+
+  // Enable patent number links on new rows
+  enableAssignmentPopup('#es-app-table .patent-number');
+
+  // Fetch sparklines for visible patents in new rows
+  const newPatents = rows.filter(r => r.patent_number).map(r => r.patent_number);
+  if (newPatents.length > 0) {
+    fetchAndRenderMicroCharts(newPatents, _portfolioState.filterSpec);
+  }
+}
+
+/**
+ * Reload the portfolio table with current filter/sort state.
+ * Clears table, renders first page, resets offset.
+ */
+function reloadPortfolioTable() {
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+  const tbody = tbl.querySelector('tbody');
+  if (!tbody) return;
+
+  // Apply filter
+  let results = applyResultFilter(_portfolioState.allResults, _portfolioState.filterSpec);
+  // Apply sort
+  results = sortResults(results, _portfolioState.sortColumn, _portfolioState.sortDirection);
+  _portfolioState.filteredResults = results;
+  _portfolioState.currentOffset = 0;
+
+  // Clear table body
+  tbody.innerHTML = '';
+
+  // Render first page
+  const page = results.slice(0, PAGE_SIZE);
+  appendResultRows(page);
+  _portfolioState.currentOffset = page.length;
+
+  // Update shown count
+  const shownCount = document.getElementById('es-shown-count');
+  const totalAll = _portfolioState.allResults.length;
+  if (shownCount) {
+    if (_portfolioState.filterSpec) {
+      shownCount.textContent = `${results.length.toLocaleString()} of ${totalAll.toLocaleString()} shown`;
+    } else {
+      shownCount.textContent = `${totalAll.toLocaleString()} shown`;
+    }
+  }
+
+  // Update scroll sentinel visibility
+  updateScrollSentinel();
+}
+
+/** Load the next page of results (infinite scroll). */
+function loadMoreRows() {
+  if (_portfolioState.loading) return;
+  const results = _portfolioState.filteredResults;
+  if (_portfolioState.currentOffset >= results.length) return;
+
+  _portfolioState.loading = true;
+  const page = results.slice(_portfolioState.currentOffset, _portfolioState.currentOffset + PAGE_SIZE);
+  appendResultRows(page);
+  _portfolioState.currentOffset += page.length;
+  _portfolioState.loading = false;
+
+  updateScrollSentinel();
+}
+
+/** Show/hide the scroll sentinel based on whether there are more rows. */
+function updateScrollSentinel() {
+  const sentinel = document.getElementById('es-scroll-sentinel');
+  if (!sentinel) return;
+  const hasMore = _portfolioState.currentOffset < _portfolioState.filteredResults.length;
+  sentinel.style.display = hasMore ? '' : 'none';
+  const remaining = _portfolioState.filteredResults.length - _portfolioState.currentOffset;
+  sentinel.textContent = hasMore ? `Scroll for more — ${remaining.toLocaleString()} remaining` : '';
+}
+
+/** Set up IntersectionObserver on the scroll sentinel. */
+let _scrollObserver = null;
+function setupInfiniteScroll() {
+  const sentinel = document.getElementById('es-scroll-sentinel');
+  if (!sentinel) return;
+  if (_scrollObserver) _scrollObserver.disconnect();
+  _scrollObserver = new IntersectionObserver(entries => {
+    if (entries[0].isIntersecting) loadMoreRows();
+  }, { rootMargin: '200px' });
+  _scrollObserver.observe(sentinel);
+}
+
 function renderApplicantPortfolio(data) {
   const pros = data.prosecution || {};
   const pg = data.post_grant || {};
@@ -1000,46 +1274,48 @@ function renderApplicantPortfolio(data) {
           <th data-sort-key="7">Changed?</th>
           <th data-sort-key="8">Ownership</th>
         </tr></thead>
-        <tbody>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="es-scroll-sentinel" class="es-scroll-sentinel" style="text-align:center;padding:1rem;color:#6b7280;font-size:0.85rem"></div>
   `;
 
-  for (const r of data.results) {
-    const changedMark = r.status_changed
-      ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
-      : '';
-    // Ownership badge
-    let ownershipBadge;
-    if (r.divested) {
-      ownershipBadge = `<span class="es-badge es-badge--divested" title="Divested ${r.divested_date || ''}">Divested${r.divested_date ? ' ' + r.divested_date.slice(0, 10) : ''}</span>`;
-    } else if (r.acquired_via_assignment) {
-      ownershipBadge = `<span class="es-badge es-badge--acquired" title="Acquired via assignment ${r.acquired_date || ''}">Acquired${r.acquired_date ? ' ' + r.acquired_date.slice(0, 10) : ''}</span>`;
-    } else {
-      ownershipBadge = `<span class="es-badge es-badge--owned">Owned</span>`;
-    }
-    const rowStyle = r.divested ? ' style="opacity:0.6"' : '';
-    html += `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-app="${escHtml(r.application_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}" data-expired="${r.expired ? '1' : ''}">
-      <td class="patent-number">${escHtml(r.patent_number || '')}</td>
-      <td>${escHtml(r.application_number || '')}</td>
-      <td>${escHtml(r.grant_date || '')}</td>
-      <td class="es-events-cell"></td>
-      <td>${statusBadge(r.prosecution_status)}</td>
-      <td>${statusBadge(r.post_grant_first)}</td>
-      <td>${statusBadge(r.post_grant_current)}</td>
-      <td>${changedMark}</td>
-      <td>${ownershipBadge}</td>
-    </tr>`;
-  }
-
-  html += '</tbody></table></div>';
   appArea.innerHTML = html;
+
+  // Store all results in portfolio state for client-side pagination
+  _portfolioState.allResults = data.results;
+  _portfolioState.filteredResults = data.results;
+  _portfolioState.currentOffset = 0;
+  _portfolioState.sortColumn = null;
+  _portfolioState.sortDirection = null;
+  _portfolioState.filterSpec = null;
+  _portfolioState.filterLabel = null;
+  _portfolioState.entityName = data.applicant_name || '';
 
   const tbl = document.getElementById('es-app-table');
   if (tbl) {
-    stampOriginalOrder(tbl);
-    enableTableSorting(tbl);
-    enableAssignmentPopup('#es-app-table .patent-number');
-    addColumnPicker(tbl);
+    // Server-side sort callback: sort from in-memory array, re-render first page
+    enableTableSorting(tbl, (colIdx, dir) => {
+      if (colIdx === null || dir === 0) {
+        _portfolioState.sortColumn = null;
+        _portfolioState.sortDirection = null;
+      } else {
+        _portfolioState.sortColumn = SORT_COL_MAP[colIdx] || null;
+        _portfolioState.sortDirection = dir === 1 ? 'asc' : 'desc';
+      }
+      reloadPortfolioTable();
+    });
+    addColumnPicker(tbl, {
+      defaultHidden: ['Grant Date', 'Prosecution', 'Post-Grant First', 'Post-Grant Current', 'Changed?', 'Ownership'],
+    });
   }
+
+  // Render first page of results
+  const firstPage = data.results.slice(0, PAGE_SIZE);
+  appendResultRows(firstPage);
+  _portfolioState.currentOffset = firstPage.length;
+  updateScrollSentinel();
+  setupInfiniteScroll();
 
   // Wire clickable KPIs
   appArea.querySelectorAll('.kpi-clickable').forEach(el => {
@@ -1168,43 +1444,26 @@ function _isActiveCase(c) {
   return s !== 'closed' && s !== 'terminated' && s !== 'resolved' && s !== 'settled';
 }
 
-/** Filter patent table to show only litigated patents. */
+/** Filter patent table to show only litigated patents (state-based). */
 function _filterPatentTableForLitigation() {
-  const tbl = document.getElementById('es-app-table');
-  if (!tbl) return;
-  const rows = tbl.querySelectorAll('tbody tr');
-  let shown = 0;
-  const visiblePatents = [];
-  rows.forEach(row => {
-    const match = row.dataset.litigated === '1';
-    row.style.display = match ? '' : 'none';
-    if (match) {
-      shown++;
-      const pn = row.dataset.pn;
-      if (pn) visiblePatents.push(pn);
-    }
-  });
+  _portfolioState.filterSpec = 'litigation:litigated';
+  _portfolioState.filterLabel = 'Litigated Patents';
+  reloadPortfolioTable();
+
   const filterLabel = document.getElementById('es-filter-label');
-  const shownCount = document.getElementById('es-shown-count');
+  const filtered = _portfolioState.filteredResults.length;
+  const total = _portfolioState.allResults.length;
   if (filterLabel) {
-    filterLabel.innerHTML = `Filtered: <strong>Litigated Patents</strong> &mdash; ${shown.toLocaleString()} of ${rows.length.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
+    filterLabel.innerHTML = `Filtered: <strong>Litigated Patents</strong> &mdash; ${filtered.toLocaleString()} of ${total.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
     filterLabel.classList.remove('hidden');
     filterLabel.querySelector('.es-filter-clear')?.addEventListener('click', () => {
       appArea.querySelectorAll('.kpi-active').forEach(a => a.classList.remove('kpi-active'));
-      rows.forEach(r => { r.style.display = ''; });
       filterLabel.classList.add('hidden');
-      if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+      _portfolioState.filterSpec = null;
+      _portfolioState.filterLabel = null;
+      reloadPortfolioTable();
       hideLitigationTable();
-      clearMicroCharts();
     });
-  }
-  if (shownCount) shownCount.textContent = `${shown.toLocaleString()} shown`;
-
-  // Fetch and render micro charts for visible litigated patents
-  if (visiblePatents.length > 0) {
-    fetchAndRenderMicroCharts(visiblePatents, 'litigation:litigated');
-  } else {
-    clearMicroCharts();
   }
 }
 
@@ -1519,25 +1778,21 @@ function renderProsecutionDetailTable(data) {
 
 /**
  * Filter the Patent Details table based on a KPI click.
- * Also fetches and renders micro chart sparklines for visible patents.
+ * Uses state-based filtering: filters the in-memory result set,
+ * then re-renders the first page via reloadPortfolioTable().
  */
 function filterPatentTable(filterSpec, label, clickedEl) {
-  const tbl = document.getElementById('es-app-table');
-  if (!tbl) return;
-
-  const rows = tbl.querySelectorAll('tbody tr');
   const filterLabel = document.getElementById('es-filter-label');
-  const shownCount = document.getElementById('es-shown-count');
 
   // Toggle off if same KPI is clicked again
   const prevActive = appArea.querySelector('.kpi-active');
   if (prevActive === clickedEl) {
     prevActive.classList.remove('kpi-active');
-    rows.forEach(row => { row.style.display = ''; });
     if (filterLabel) filterLabel.classList.add('hidden');
-    if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    _portfolioState.filterSpec = null;
+    _portfolioState.filterLabel = null;
     hideLitigationTable();
-    clearMicroCharts();
+    reloadPortfolioTable();
     return;
   }
 
@@ -1548,74 +1803,24 @@ function filterPatentTable(filterSpec, label, clickedEl) {
   // Hide litigation table when a non-litigation KPI is clicked
   hideLitigationTable();
 
-  // Parse filter spec — "field:val1,val2"
-  const colonIdx = filterSpec.indexOf(':');
-  const field = filterSpec.slice(0, colonIdx);
-  const codes = filterSpec.slice(colonIdx + 1).split(',');
+  // Set filter in state and reload table
+  _portfolioState.filterSpec = filterSpec;
+  _portfolioState.filterLabel = label;
+  reloadPortfolioTable();
 
-  let shown = 0;
-  const visiblePatents = [];
-  rows.forEach(row => {
-    let match = false;
-    if (field === 'mf') {
-      const mfTokens = (row.dataset.mf || '').split(' ');
-      match = codes.some(c => mfTokens.includes(c));
-    } else if (field === 'pros') {
-      match = codes.includes(row.dataset.pros);
-    } else if (field === 'pros10y') {
-      match = codes.includes(row.dataset.pros10y);
-    } else if (field === 'ownership') {
-      if (codes.includes('divested')) match = row.dataset.divested === '1';
-      else if (codes.includes('acquired')) match = row.dataset.acquired === '1';
-    } else if (field === 'portfolio') {
-      const code = codes[0];
-      const isGranted = !!row.dataset.pn;
-      const isPending = !isGranted;
-      const isDivested = row.dataset.divested === '1';
-      const isAcquired = row.dataset.acquired === '1';
-      const isExpired = row.dataset.expired === '1';
-      if (code === 'filed_granted') match = isGranted && !isAcquired;
-      else if (code === 'acquired_granted') match = isGranted && isAcquired;
-      else if (code === 'divested_granted') match = isGranted && isDivested;
-      else if (code === 'expired_granted') match = isGranted && !isDivested && isExpired;
-      else if (code === 'filed_pending') match = isPending && !isAcquired;
-      else if (code === 'acquired_pending') match = isPending && isAcquired;
-      else if (code === 'divested_pending') match = isPending && isDivested;
-    } else if (field === 'litigation') {
-      if (codes.includes('litigated')) match = row.dataset.litigated === '1';
-    } else if (field === 'prospay') {
-      // Filter by prosecution payment status (data set after analysis)
-      const ppStatuses = (row.dataset.prospay || '').split(',').filter(Boolean);
-      match = codes.some(c => ppStatuses.includes(c));
-    }
-    row.style.display = match ? '' : 'none';
-    if (match) {
-      shown++;
-      const pn = row.dataset.pn;
-      if (pn) visiblePatents.push(pn);
-    }
-  });
-
-  // Update filter label pill
+  // Show filter label pill with count
+  const filtered = _portfolioState.filteredResults.length;
+  const total = _portfolioState.allResults.length;
   if (filterLabel) {
-    filterLabel.innerHTML = `Filtered: <strong>${escHtml(label)}</strong> &mdash; ${shown.toLocaleString()} of ${rows.length.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
+    filterLabel.innerHTML = `Filtered: <strong>${escHtml(label)}</strong> &mdash; ${filtered.toLocaleString()} of ${total.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
     filterLabel.classList.remove('hidden');
     filterLabel.querySelector('.es-filter-clear').addEventListener('click', () => {
       clickedEl.classList.remove('kpi-active');
-      rows.forEach(row => { row.style.display = ''; });
       filterLabel.classList.add('hidden');
-      if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
-      clearMicroCharts();
+      _portfolioState.filterSpec = null;
+      _portfolioState.filterLabel = null;
+      reloadPortfolioTable();
     });
-  }
-
-  if (shownCount) shownCount.textContent = `${shown.toLocaleString()} of ${rows.length.toLocaleString()} shown`;
-
-  // Fetch and render micro charts for visible patents
-  if (visiblePatents.length > 0) {
-    fetchAndRenderMicroCharts(visiblePatents, filterSpec);
-  } else {
-    clearMicroCharts();
   }
 }
 
@@ -1700,13 +1905,15 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
     }
 
     // Inject prosecution payment events into timelines (if loaded)
+    // Only inject for patents in our current batch to avoid overwriting prior pages
+    const requestedPnSet = new Set(patentNumbers);
     if (window._prosecutionData) {
-      // Build pn→app map from table rows
+      // Build pn→app map from table rows (only for requested patents)
       const pnToApp = {};
       tbl.querySelectorAll('tbody tr').forEach(row => {
         const pn = row.dataset.pn;
         const app = row.dataset.app;
-        if (pn && app) pnToApp[pn] = app;
+        if (pn && app && requestedPnSet.has(pn)) pnToApp[pn] = app;
       });
 
       // Store prosecution segments per patent for phase-aware line coloring
@@ -1767,12 +1974,13 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       if (ci >= 0) filterSpec.slice(ci + 1).split(',').forEach(c => highlightCodes.add(c));
     }
 
-    // Render sparkline into each visible row's Events cell
+    // Render sparkline into each visible row's Events cell (only for requested patents)
     tbl.querySelectorAll('tbody tr').forEach(row => {
       if (row.style.display === 'none') return;
       const pn = row.dataset.pn;
       const cell = row.querySelector('.es-events-cell');
       if (!cell || !pn) return;
+      if (!requestedPnSet.has(pn)) return; // skip rows from other pages
 
       const events = data.timelines[pn] || [];
       if (events.length === 0) {
