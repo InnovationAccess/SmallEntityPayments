@@ -156,3 +156,4 @@ The `pat_assign_records.normalized_type` column classifies each assignment into 
 - API: `gcloud run deploy uspto-api --source=. --project=uspto-data-app --region=us-central1 --allow-unauthenticated`
 - ETL: `gcloud builds submit --config=cloudbuild-etl.yaml --project=uspto-data-app`
 - CI/CD: GitHub Actions deploys on push to main (.github/workflows/deploy.yml)
+- At session end, merge the session branch to main before closing — handoff documents left on feature branches are invisible to the next session
