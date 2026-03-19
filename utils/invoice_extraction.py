@@ -569,10 +569,36 @@ def extract_with_gemini(pdf_bytes: bytes) -> Optional[dict]:
         else:
             return None
 
+    # Sanitize numeric fields — Gemini may return formatted strings like "3,200.00"
+    result["total_amount"] = _to_float(result.get("total_amount"))
+    result["issue_fee_due"] = _to_float(result.get("issue_fee_due"))
+    for fee in result.get("fees", []):
+        if isinstance(fee, dict):
+            fee["amount"] = _to_float(fee.get("amount"))
+            fee["item_total"] = _to_float(fee.get("item_total"))
+            fee["quantity"] = _to_float(fee.get("quantity")) or 1
+
     result["raw_response"] = text
     result["extraction_method"] = "gemini_vision"
     result["extraction_model"] = GEMINI_MODEL
     return result
+
+
+def _to_float(val) -> Optional[float]:
+    """Safely convert a value to float, handling commas, dollar signs, etc."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        cleaned = val.replace(",", "").replace("$", "").replace(" ", "").strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    return None
 
 
 # ── BigQuery functions ───────────────────────────────────────────

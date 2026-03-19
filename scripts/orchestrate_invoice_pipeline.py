@@ -63,8 +63,11 @@ BQ_DATASET = os.environ.get("BIGQUERY_DATASET", "uspto_data")
 
 def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
     """Get all application numbers for an entity (same portfolio query as entity_status.py)."""
+    # Default: last 10 years of filings. Set FILING_YEARS env var to override.
+    filing_years = int(os.environ.get("FILING_YEARS", "10"))
+
     query = f"""
-    SELECT DISTINCT application_number FROM (
+    WITH portfolio AS (
         -- Source 1: pfw_applicants
         SELECT DISTINCT application_number
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_applicants`
@@ -86,7 +89,15 @@ def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
           ON a.reel_frame = d.reel_frame
         WHERE UPPER(a.assignee_name) LIKE CONCAT('%', UPPER(@entity), '%')
     )
-    ORDER BY application_number DESC  -- most recent first (more actionable for monetization)
+    SELECT p.application_number, pfw.filing_date
+    FROM portfolio p
+    JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.patent_file_wrapper_v2` pfw
+      ON p.application_number = pfw.application_number
+    -- Utility apps only (numeric). PCT/design/reissue don't work with USPTO Documents API.
+    WHERE REGEXP_CONTAINS(p.application_number, r'^\\d+$')
+      AND pfw.filing_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {filing_years} YEAR)
+    -- Most recently filed first (most actionable for monetization)
+    ORDER BY pfw.filing_date DESC
     """
 
     job_config = bigquery.QueryJobConfig(
@@ -355,9 +366,11 @@ def main():
         logger.error("ENTITY_NAME environment variable is required")
         sys.exit(1)
 
+    filing_years = int(os.environ.get("FILING_YEARS", "10"))
     logger.info("=" * 60)
     logger.info("Invoice Pipeline Orchestrator")
     logger.info("Entity: %s", ENTITY_NAME)
+    logger.info("Filing window: last %d years", filing_years)
     logger.info("Parallel downloads: %d", PARALLEL_DOWNLOADS)
     logger.info("Max apps: %s", MAX_APPS or "unlimited")
     logger.info("=" * 60)
