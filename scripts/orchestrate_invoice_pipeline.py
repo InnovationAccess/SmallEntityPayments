@@ -84,7 +84,7 @@ def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_assignees` a
         JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_documents` d
           ON a.reel_frame = d.reel_frame
-        WHERE UPPER(a.name) LIKE CONCAT('%', UPPER(@entity), '%')
+        WHERE UPPER(a.assignee_name) LIKE CONCAT('%', UPPER(@entity), '%')
     )
     ORDER BY application_number DESC  -- most recent first (more actionable for monetization)
     """
