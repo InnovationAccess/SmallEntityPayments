@@ -1343,18 +1343,8 @@ async function fetchProsecutionPaymentsAuto(entityName, allApps) {
       row.dataset.prospay = [...statuses].join(',');
     });
 
-    // Wire KPI click handlers for the prosecution payment section
-    const prosPaySection = document.getElementById('es-pros-payments');
-    if (prosPaySection) {
-      prosPaySection.querySelectorAll('.kpi-clickable').forEach(el => {
-        if (!el._prosWired) {
-          el._prosWired = true;
-          el.addEventListener('click', () => {
-            filterPatentTable(el.dataset.filter, el.dataset.label, el);
-          });
-        }
-      });
-    }
+    // KPI click handlers already wired by renderApplicantPortfolio() at line 1045
+    // (all .kpi-clickable in appArea, including prosecution KPIs)
 
     // Render summary and detail tables
     renderProsecutionSummaryTable(merged);
