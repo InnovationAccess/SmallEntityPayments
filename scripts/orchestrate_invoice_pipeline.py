@@ -173,7 +173,7 @@ def extract_single_doc(
         extraction = extract_with_pdfplumber(pdf_bytes)
         if extraction:
             _update_extraction_status(
-                bq_client, app_number, gcs_path, extraction, "extracted"
+                bq_client, app_number, gcs_path, extraction, "extracted", row
             )
             return {"gcs_path": gcs_path, "success": True, "method": "pdfplumber"}
 
@@ -181,13 +181,13 @@ def extract_single_doc(
         extraction = extract_with_gemini(pdf_bytes)
         if extraction:
             _update_extraction_status(
-                bq_client, app_number, gcs_path, extraction, "extracted"
+                bq_client, app_number, gcs_path, extraction, "extracted", row
             )
             return {"gcs_path": gcs_path, "success": True, "method": "gemini"}
 
         # Both failed
         _update_extraction_status(
-            bq_client, app_number, gcs_path, None, "failed"
+            bq_client, app_number, gcs_path, None, "failed", row
         )
         return {"gcs_path": gcs_path, "success": False, "method": "none"}
 
@@ -230,6 +230,7 @@ def _update_extraction_status(
     gcs_path: str,
     extraction: dict | None,
     status: str,
+    row_meta: dict | None = None,
 ):
     """Update or insert extraction data for a document.
 
@@ -287,7 +288,7 @@ def _update_extraction_status(
         if "streaming buffer" in str(e).lower():
             # Row is in streaming buffer — fall back to INSERT a new row
             logger.info("Streaming buffer for %s, inserting new row instead", gcs_path)
-            _insert_extraction_row(bq_client, app_number, gcs_path, extraction, status, now)
+            _insert_extraction_row(bq_client, app_number, gcs_path, extraction, status, now, row_meta)
         else:
             raise
 
@@ -299,24 +300,36 @@ def _insert_extraction_row(
     extraction: dict | None,
     status: str,
     now: str,
+    row_meta: dict | None = None,
 ):
-    """Insert a new extraction row (fallback when UPDATE fails on streaming buffer)."""
+    """Insert a new extraction row (fallback when UPDATE fails on streaming buffer).
+
+    Carries forward doc_code and mail_date from the original download row
+    so the extraction record has complete metadata.
+    """
     fees = []
     if extraction:
         fees = extraction.get("fees", [])
     fees_json = json.dumps(fees) if isinstance(fees, list) else "[]"
 
+    doc_code = (row_meta or {}).get("doc_code", "") or ""
+    mail_date = (row_meta or {}).get("mail_date") or None
+
     query = """
     INSERT INTO `uspto-data-app.uspto_data.invoice_extractions`
-      (application_number, gcs_path, extraction_status, entity_status, fees_json,
-       total_amount, extraction_method, extraction_model, extracted_at, raw_response)
+      (application_number, gcs_path, doc_code, mail_date, extraction_status,
+       entity_status, fees_json, total_amount, extraction_method,
+       extraction_model, extracted_at, raw_response)
     VALUES
-      (@app, @gcs_path, @status, @entity_status, @fees_json,
-       @total_amount, @method, @model, @now, @raw_response)
+      (@app, @gcs_path, @doc_code, @mail_date, @status,
+       @entity_status, @fees_json, @total_amount, @method,
+       @model, @now, @raw_response)
     """
     params = [
         bigquery.ScalarQueryParameter("app", "STRING", app_number),
         bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
+        bigquery.ScalarQueryParameter("doc_code", "STRING", doc_code),
+        bigquery.ScalarQueryParameter("mail_date", "STRING", mail_date),
         bigquery.ScalarQueryParameter("status", "STRING", status),
         bigquery.ScalarQueryParameter("entity_status", "STRING",
                                       extraction.get("entity_status") if extraction else None),
