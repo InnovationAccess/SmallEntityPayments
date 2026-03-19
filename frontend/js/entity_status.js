@@ -45,108 +45,108 @@ const GRAY = '#6b7280';
 
 // Prosecution payment event code descriptions (for tooltips)
 const PROS_PAY_DESCRIPTIONS = {
-  'A.I.': 'Informal or Non-Responsive Amendment after Examiner Action',
-  'A.LA': 'Untimely (Late) Amendment Filed',
-  'A.NQ': 'Amendment Crossed in Mail',
-  'A.NR': 'Non-Responsive Amendment after Non-Final Action',
-  'A.PE': 'Preliminary Amendment',
-  'A371': 'Applicant 371 Filing Paper Received',
-  'AABR': 'Amendment After Brief',
-  'ABN/': 'Abandonment - Filing Fee Not Paid',
-  'ABN6': 'Abandonment for Failure to Pay Issue Fee',
-  'ABN9': 'Disposal for a RCE / CPA / R129',
-  'ABNF': 'Abandonment - Filing Fee Paid',
-  'ACKNAHA': 'I.B. Acknowledged Receipt of NOA (Hague)',
-  'ADDDWRG': 'Omitted Drawing Sheets (Changes Filing Date)',
-  'ADDFLFEE': 'Additional Application Filing Fees',
-  'ADDSPEC': 'Omitted Specification Pages (Changes Filing Date)',
-  'AFNE': 'After Final Consideration Program Amendment too Extensive',
-  'AP.B': 'Appeal Brief Filed',
-  'AP.C': 'Request for Pre-Appeal Conference Filed',
-  'AP.C3': 'Request for Pre-Appeal Conf. 3 Path',
-  'AP/A': 'Amendment/Argument after Notice of Appeal',
-  'APBD': 'Notice - Defective Appeal Brief',
-  'APBI': 'Defective / Incomplete Appeal Brief Filed',
-  'APBR': 'Appeal Brief Review Complete',
-  'APCA': 'Pre-Appeal Conf. Decision - Rejection Withdrawn',
-  'APCD': 'Pre-Appeal Conf. Decision - Request Defective',
-  'APCP': 'Pre-Appeal Conf. Decision - Proceed to PTAB',
-  'APCR': 'Pre-Appeal Conf. Decision - Reopen Prosecution',
-  'APE2': '2nd or Subsequent Examiner Answer to Appeal Brief',
-  'APEA': 'Examiner Answer to Appeal Brief',
-  'APFC': 'Appeal to District or Federal Court Filed',
-  'APHT': 'PTAB Oral Hearing Transcript',
-  'APND': 'Notice - Defective Notice of Appeal',
-  'APNH': 'Notification of Appeal Hearing',
-  'APNH.CA': 'Appeal Hearing - Silicon Valley, CA',
-  'APNH.CO': 'Appeal Hearing - Denver, CO',
-  'APNH.MI': 'Appeal Hearing - Detroit, MI',
-  'APNH.TX': 'Appeal Hearing - Dallas, TX',
-  'APNH.VA': 'Appeal Hearing - Alexandria, VA',
-  'APOH': 'Request for Oral Hearing',
-  'APRD': 'Order Returning Undocketed Appeal to Examiner',
-  'APRR': 'Request for Reconsideration of Appeal Decision',
-  'ARBP': 'Appeal Ready for PAC Review',
-  'BRCE': 'Workflow - Request for RCE - Begin',
-  'C610': 'Foreign Priority Papers Filed',
-  'C9DE': 'COVID-19 Deferred Fee Program - Denial',
-  'C9GR': 'COVID-19 Deferred Fee Program - Acceptance',
-  'CPA-AMD': 'RCE Amendment Informal or Non-Responsive',
-  'DIST': 'Terminal Disclaimer Filed',
-  'FEE.': 'Fee Payment Recorded',
-  'FLFEE': 'Payment of Additional Filing Fee',
-  'FRCE': 'Workflow - Request for RCE - Finish',
-  'IDS.': 'Information Disclosure Statement Filed',
-  'IDSPTA': 'PTA Statement Filed with IDS',
-  'IFEE': 'Issue Fee Payment Received',
-  'IFEEHA': 'Issue Fee Data Received from I.B. (Hague)',
-  'IRCE': 'Improper Request for Continued Examination',
-  'J521': 'Amicus Brief Received',
-  'JA94': 'Request for Extension of Time to Appeal to CAFC',
-  'JA95': 'Extension of Time Granted to Appeal to CAFC',
-  'JS13': 'Petition for Certiorari Received',
-  'MABN6': 'Mail Abandonment for Failure to Pay Issue Fee',
-  'MAPHT': 'Mail PTAB Oral Hearing Transcript',
-  'MCPA-AMD': 'Mail Notice of Informal/Non-Responsive RCE Amendment',
-  'MODPD28': 'Mail Issue Fee Returned Unpaid',
-  'MODPD33': 'Mail Notice Regarding Unsigned 85B Form',
-  'MP005': 'Mail Petition Granted - Accept Delayed Issue Fee',
-  'MP020': 'Mail Petition Granted - Extension of Time in Reexam',
-  'MQRCE': 'Mail Quick Path IDS Examiner-Directed Entry of RCE',
-  'MRAPD': 'RX - Mail Notice of Appeal Defective',
-  'MRAPS': 'RX - Mail Supplemental Examiner Answer to Appeal',
-  'MRXEAS': 'RX - Mail Supplemental Examiner Answer to Appeal Brief',
-  'MRXG.': 'RX - Mail Extension of Time Granted',
-  'MRXTG': 'RX - Mail Extension of Time Granted',
-  'MSML': 'Verified Statement of Micro to Small Entity Status',
-  'N/AP': 'Notice of Appeal Filed',
-  'N/AP-NOA': 'Notice of Appeal Filed After NOA',
-  'N084': 'Issue Fee Payment Verified',
-  'NOIFIBHA': 'Issue Fee Not Paid Directly to I.B. (Hague)',
-  'ODPD28': 'Issue Fee Returned Unpaid',
-  'ODPD33': 'Notice Regarding Unsigned 85B Form',
-  'ODPET4': 'Petition to Revive Application - Dismissed',
-  'P003': 'Petition Granted to Make Special',
-  'P005': 'Petition Granted - Accept Delayed Issue Fee',
-  'P007': 'Petition Granted - Withdraw from Issue for Abandonment',
-  'P010': 'Petition Granted Related to Filing Date',
-  'P012': 'Petition Granted Related to Inventor',
-  'P020': 'Petition Granted - Extension of Time in Reexam',
-  'P131': 'Form Deleted',
-  'P138': 'Communication Regarding Extension of Time',
-  'PFP': 'Petition Fee Paid',
-  'PMFP': 'Petition to Accept Late Maintenance Fee Payment',
-  'QRCE': 'Quick Path IDS Examiner-Directed Entry of RCE',
-  'RCEX': 'Request for Continued Examination (RCE)',
-  'RETF': 'Payment of Retention Fee',
-  'RVIFEEHA': 'Reversal of Issue Fee by I.B. (Hague)',
-  'RXIDS.R': 'Reexam - IDS Filed by Third Party Requester',
-  'RXRQ/T': 'Request for Extension of Time',
-  'RXSAPB': 'Supplemental Appeal Brief Filed',
-  'RXXT/G': 'Request for Extension of Time Granted',
-  'TDP': 'Terminal Disclaimer Fee Paid',
-  'VFEE': 'Reverse Issue Fee',
-  'XT/G': 'Request for Extension of Time - Granted',
+  'A.I.': 'Processing fee (1.17(i)(1))',
+  'A.LA': 'Processing fee (1.17(i)(1))',
+  'A.NQ': 'Processing fee (1.17(i)(1))',
+  'A.NR': 'Processing fee (1.17(i)(1))',
+  'A.PE': 'Processing fee (1.17(i)(1))',
+  'A371': 'Basic filing fee - Utility (1.16(a))',
+  'AABR': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'ABN/': 'Basic filing fee - Utility (1.16(a))',
+  'ABN6': 'Basic filing fee - Utility (1.16(a))',
+  'ABN9': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'ABNF': 'Basic filing fee - Utility (1.16(a))',
+  'ACKNAHA': 'Processing fee (1.17(i)(1))',
+  'ADDDWRG': 'Processing fee (1.17(i)(1))',
+  'ADDFLFEE': 'Basic filing fee - Utility (1.16(a))',
+  'ADDSPEC': 'Processing fee (1.17(i)(1))',
+  'AFNE': 'Processing fee (1.17(i)(1))',
+  'AP.B': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'AP.C': 'Notice of appeal (1.17(b)(1))',
+  'AP.C3': 'Notice of appeal (1.17(b)(1))',
+  'AP/A': 'Notice of appeal (1.17(b)(1))',
+  'APBD': 'Notice of appeal (1.17(b)(1))',
+  'APBI': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'APBR': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'APCA': 'Notice of appeal (1.17(b)(1))',
+  'APCD': 'Notice of appeal (1.17(b)(1))',
+  'APCP': 'Notice of appeal (1.17(b)(1))',
+  'APCR': 'Notice of appeal (1.17(b)(1))',
+  'APE2': 'Notice of appeal (1.17(b)(1))',
+  'APEA': 'Notice of appeal (1.17(b)(1))',
+  'APFC': 'Notice of appeal (1.17(b)(1))',
+  'APHT': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'APND': 'Notice of appeal (1.17(b)(1))',
+  'APNH': 'Notice of appeal (1.17(b)(1))',
+  'APNH.CA': 'Notice of appeal (1.17(b)(1))',
+  'APNH.CO': 'Notice of appeal (1.17(b)(1))',
+  'APNH.MI': 'Notice of appeal (1.17(b)(1))',
+  'APNH.TX': 'Notice of appeal (1.17(b)(1))',
+  'APNH.VA': 'Notice of appeal (1.17(b)(1))',
+  'APOH': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'APRD': 'Notice of appeal (1.17(b)(1))',
+  'APRR': 'Notice of appeal (1.17(b)(1))',
+  'ARBP': 'Processing fee (1.17(i)(1))',
+  'BRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'C610': 'Processing fee (1.17(i)(1))',
+  'C9DE': 'Processing fee (1.17(i)(1))',
+  'C9GR': 'Basic filing fee - Utility (1.16(a))',
+  'CPA-AMD': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'DIST': 'Terminal disclaimer (1.20(d))',
+  'FEE.': 'Processing fee (1.17(i)(1))',
+  'FLFEE': 'Basic filing fee - Utility (1.16(a))',
+  'FRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'IDS.': 'Submission of Information Disclosure Statement (1.17(p))',
+  'IDSPTA': 'Submission of Information Disclosure Statement (1.17(p))',
+  'IFEE': 'Utility issue fee (1.18(a))',
+  'IFEEHA': 'Utility issue fee (1.18(a))',
+  'IRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'J521': 'Processing fee (1.17(i)(1))',
+  'JA94': 'Extension for response within first month (1.17(a)(1))',
+  'JA95': 'Extension for response within first month (1.17(a)(1))',
+  'JS13': 'Processing fee (1.17(i)(1))',
+  'MABN6': 'Basic filing fee - Utility (1.16(a))',
+  'MAPHT': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'MCPA-AMD': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'MODPD28': 'Utility issue fee (1.18(a))',
+  'MODPD33': 'Processing fee (1.17(i)(1))',
+  'MP005': 'Utility issue fee (1.18(a))',
+  'MP020': 'Extension for response within first month (1.17(a)(1))',
+  'MQRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'MRAPD': 'Notice of appeal (1.17(b)(1))',
+  'MRAPS': 'Processing fee (1.17(i)(1))',
+  'MRXEAS': 'Processing fee (1.17(i)(1))',
+  'MRXG.': 'Extension for response within first month (1.17(a)(1))',
+  'MRXTG': 'Extension for response within first month (1.17(a)(1))',
+  'MSML': 'Processing fee (1.17(i)(1))',
+  'N/AP': 'Notice of appeal (1.17(b)(1))',
+  'N/AP-NOA': 'Notice of appeal (1.17(b)(1))',
+  'N084': 'Utility issue fee (1.18(a))',
+  'NOIFIBHA': 'Processing fee (1.17(i)(1))',
+  'ODPD28': 'Utility issue fee (1.18(a))',
+  'ODPD33': 'Processing fee (1.17(i)(1))',
+  'ODPET4': 'Petition for revival of abandoned application (1.17(m))',
+  'P003': 'Processing fee (1.17(i)(1))',
+  'P005': 'Utility issue fee (1.18(a)) + Petition for revival (1.17(m))',
+  'P007': 'Processing fee (1.17(i)(1)) — proxy',
+  'P010': 'Processing fee (1.17(i)(1))',
+  'P012': 'Processing fee (1.17(i)(1))',
+  'P020': 'Extension for response within first month (1.17(a)(1))',
+  'P131': 'Processing fee (1.17(i)(1))',
+  'P138': 'Extension for response within first month (1.17(a)(1))',
+  'PFP': 'Processing fee (1.17(i)(1))',
+  'PMFP': 'Processing fee (1.17(i)(1))',
+  'QRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'RCEX': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'RETF': 'Processing fee (1.17(i)(1))',
+  'RVIFEEHA': 'Utility issue fee (1.18(a)) — reversal',
+  'RXIDS.R': 'Submission of Information Disclosure Statement (1.17(p))',
+  'RXRQ/T': 'Extension for response within first month (1.17(a)(1))',
+  'RXSAPB': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'RXXT/G': 'Extension for response within first month (1.17(a)(1))',
+  'TDP': 'Terminal disclaimer (1.20(d))',
+  'VFEE': 'Utility issue fee (1.18(a)) — reversal',
+  'XT/G': 'Extension for response within first month (1.17(a)(1))',
 };
 
 // Prosecution status-change codes (beyond the 3 basic ones)
@@ -790,6 +790,36 @@ function renderApplicantPortfolio(data) {
               <span class="cite-stat-label">Apps w/ Findings</span>
             </div>
           </div>
+          <p class="text-muted" style="margin:0.75rem 0 0.25rem;font-size:0.8rem;font-weight:600">Dollar Impact — Reduced-Rate Payments (Small + Micro)</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-paid">$0</span>
+              <span class="cite-stat-label">Amount Paid</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-large">$0</span>
+              <span class="cite-stat-label">Large Rate</span>
+            </div>
+            <div class="cite-stat" style="background:#fef2f2">
+              <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta">$0</span>
+              <span class="cite-stat-label">Underpayment</span>
+            </div>
+          </div>
+          <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-paid-10y">$0</span>
+              <span class="cite-stat-label">Amount Paid</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-large-10y">$0</span>
+              <span class="cite-stat-label">Large Rate</span>
+            </div>
+            <div class="cite-stat" style="background:#fef2f2">
+              <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta-10y">$0</span>
+              <span class="cite-stat-label">Underpayment</span>
+            </div>
+          </div>
         </div>
         <p class="text-muted" id="es-pros-pay-status" style="margin:0.25rem 0 0;font-size:0.8rem"></p>
       </div>
@@ -1262,7 +1292,9 @@ async function fetchProsecutionPayments() {
       payments_detail: [],
       summary: {},
       kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0,
-              small_10y: 0, micro_10y: 0, large_10y: 0, total_10y: 0, apps_with_findings_10y: 0 },
+              small_10y: 0, micro_10y: 0, large_10y: 0, total_10y: 0, apps_with_findings_10y: 0,
+              reduced_paid: 0, reduced_large_rate: 0, reduced_underpayment: 0,
+              reduced_paid_10y: 0, reduced_large_rate_10y: 0, reduced_underpayment_10y: 0 },
       date_range: null,
       cache_stats: { from_cache: 0, freshly_analyzed: 0 },
     };
@@ -1297,6 +1329,13 @@ async function fetchProsecutionPayments() {
       merged.kpis.micro_10y += k.micro_10y || 0;
       merged.kpis.large_10y += k.large_10y || 0;
       merged.kpis.total_10y += k.total_10y || 0;
+      // Dollar KPIs (reduced-rate only — Small + Micro)
+      merged.kpis.reduced_paid += k.reduced_paid || 0;
+      merged.kpis.reduced_large_rate += k.reduced_large_rate || 0;
+      merged.kpis.reduced_underpayment += k.reduced_underpayment || 0;
+      merged.kpis.reduced_paid_10y += k.reduced_paid_10y || 0;
+      merged.kpis.reduced_large_rate_10y += k.reduced_large_rate_10y || 0;
+      merged.kpis.reduced_underpayment_10y += k.reduced_underpayment_10y || 0;
       // apps_with_findings must be re-counted from merged timelines
       // (app might appear in multiple batches — unlikely but safe)
 
@@ -1353,6 +1392,19 @@ async function fetchProsecutionPayments() {
     setKpi('es-pros-pay-large-10y', merged.kpis.large_10y || 0);
     setKpi('es-pros-pay-total-10y', merged.kpis.total_10y || 0);
     setKpi('es-pros-pay-apps-10y', merged.kpis.apps_with_findings_10y || 0);
+
+    // Dollar KPIs
+    const setDollar = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '$' + Math.round(val).toLocaleString();
+    };
+    setDollar('es-pros-pay-dollars-paid', merged.kpis.reduced_paid);
+    setDollar('es-pros-pay-dollars-large', merged.kpis.reduced_large_rate);
+    setDollar('es-pros-pay-dollars-delta', merged.kpis.reduced_underpayment);
+    setDollar('es-pros-pay-dollars-paid-10y', merged.kpis.reduced_paid_10y);
+    setDollar('es-pros-pay-dollars-large-10y', merged.kpis.reduced_large_rate_10y);
+    setDollar('es-pros-pay-dollars-delta-10y', merged.kpis.reduced_underpayment_10y);
+
     if (kpisEl) kpisEl.style.display = '';
 
     // Set data-prospay on table rows (comma-separated statuses)
@@ -1497,17 +1549,29 @@ function renderProsecutionDetailTable(data) {
             <th data-sort-key="2">Code</th>
             <th data-sort-key="3">Description</th>
             <th data-sort-key="4">Status</th>
-            <th data-sort-key="5">Origin Code</th>
-            <th data-sort-key="6">Origin Date</th>
+            <th data-sort-key="5" style="text-align:right">Paid ($)</th>
+            <th data-sort-key="6" style="text-align:right">Large ($)</th>
+            <th data-sort-key="7" style="text-align:right">Underpay ($)</th>
+            <th data-sort-key="8">Fee Category</th>
+            <th data-sort-key="9">Origin Code</th>
+            <th data-sort-key="10">Origin Date</th>
           </tr></thead><tbody>`;
 
   for (const d of details) {
+    const paid = d.amount_paid || 0;
+    const large = d.large_rate || 0;
+    const underpay = d.underpayment || 0;
+    const catLabel = (d.fee_category || '').replace(/_/g, ' ');
     html += `<tr>
       <td>${escHtml(d.application_number || '')}</td>
       <td>${escHtml(d.event_date || '')}</td>
       <td title="${escHtml(PROS_PAY_DESCRIPTIONS[d.event_code] || d.event_code || '')}">${escHtml(d.event_code || '')}</td>
       <td>${escHtml(d.event_description || '')}</td>
       <td>${statusBadge(d.claimed_status)}</td>
+      <td style="text-align:right">$${paid.toLocaleString()}</td>
+      <td style="text-align:right">$${large.toLocaleString()}</td>
+      <td style="text-align:right${underpay > 0 ? ';color:#dc2626;font-weight:600' : ''}">$${underpay.toLocaleString()}</td>
+      <td>${escHtml(catLabel)}</td>
       <td>${escHtml(d.origin_code || '')}</td>
       <td>${escHtml(d.origin_date || '')}</td>
     </tr>`;

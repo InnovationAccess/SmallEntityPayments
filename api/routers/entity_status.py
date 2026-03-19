@@ -101,6 +101,13 @@ _PROS_PAYMENT_CODES = [
     'RXIDS.R', 'RXRQ/T', 'RXSAPB', 'RXXT/G', 'TDP', 'VFEE', 'XT/G',
 ]
 
+# IDS trigger codes — needed to determine if IDS filing requires a fee
+# (IDS is only a PAY event if filed after Final Office Action or NOA)
+_IDS_TRIGGER_CODES = ['CTFR', 'MS95', 'NOA', 'MAILNOA', 'D.ISS']
+
+# Cache version — bumped when fee calculation logic changes
+_CACHE_VERSION = 2
+
 
 # ── Endpoints ─────────────────────────────────────────────────────
 
@@ -473,12 +480,19 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
 
     Max 200 applications per request.
     """
+    _dollar_kpi_zeros = {
+        "total_paid": 0, "total_large_rate": 0, "total_underpayment": 0,
+        "reduced_paid": 0, "reduced_large_rate": 0, "reduced_underpayment": 0,
+        "total_paid_10y": 0, "total_large_rate_10y": 0, "total_underpayment_10y": 0,
+        "reduced_paid_10y": 0, "reduced_large_rate_10y": 0, "reduced_underpayment_10y": 0,
+    }
     empty = {"timelines": {}, "date_range": None,
              "payments_detail": [], "summary": {},
              "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
                       "apps_with_findings": 0,
                       "small_10y": 0, "micro_10y": 0, "large_10y": 0,
-                      "total_10y": 0, "apps_with_findings_10y": 0},
+                      "total_10y": 0, "apps_with_findings_10y": 0,
+                      **_dollar_kpi_zeros},
              "cache_stats": {"from_cache": 0, "freshly_analyzed": 0}}
     if not req.application_numbers:
         return empty
@@ -492,6 +506,7 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
            small_count, micro_count, large_count, filing_date
     FROM `{settings.prosecution_payment_cache_table}`
     WHERE application_number IN UNNEST(@an_list)
+      AND cache_version = {_CACHE_VERSION}
     """
     cache_rows = bq_service.run_query(cache_sql, cache_params)
 
@@ -532,6 +547,19 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     kpi_large_10y = 0
     apps_with_findings: set = set()
     apps_with_findings_10y: set = set()
+    # Dollar accumulators
+    kpi_total_paid = 0
+    kpi_total_large = 0
+    kpi_total_delta = 0
+    kpi_reduced_paid = 0      # Small+Micro only
+    kpi_reduced_large = 0
+    kpi_reduced_delta = 0
+    kpi_total_paid_10y = 0
+    kpi_total_large_10y = 0
+    kpi_total_delta_10y = 0
+    kpi_reduced_paid_10y = 0
+    kpi_reduced_large_10y = 0
+    kpi_reduced_delta_10y = 0
     global_min = None
     global_max = None
     ten_yr_cutoff = _fmt_date(_date.today().replace(year=_date.today().year - 10))
@@ -566,6 +594,10 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
             _update_range_str(pay.get("d"))
             pay_status = pay.get("status", "LARGE")
 
+            pay_paid = pay.get("paid", 0)
+            pay_large = pay.get("large", 0)
+            pay_delta = pay.get("delta", 0)
+
             if pay_status == "SMALL":
                 kpi_small += 1
                 apps_with_findings.add(an)
@@ -574,6 +606,15 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                 apps_with_findings.add(an)
             else:
                 kpi_large += 1
+
+            # Dollar accumulators (all events with fees)
+            kpi_total_paid += pay_paid
+            kpi_total_large += pay_large
+            kpi_total_delta += pay_delta
+            if pay_status in ("SMALL", "MICRO"):
+                kpi_reduced_paid += pay_paid
+                kpi_reduced_large += pay_large
+                kpi_reduced_delta += pay_delta
 
             # 10-year window KPIs
             if pay.get("d") and pay["d"] >= ten_yr_cutoff:
@@ -585,6 +626,14 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                     apps_with_findings_10y.add(an)
                 else:
                     kpi_large_10y += 1
+
+                kpi_total_paid_10y += pay_paid
+                kpi_total_large_10y += pay_large
+                kpi_total_delta_10y += pay_delta
+                if pay_status in ("SMALL", "MICRO"):
+                    kpi_reduced_paid_10y += pay_paid
+                    kpi_reduced_large_10y += pay_large
+                    kpi_reduced_delta_10y += pay_delta
 
             # Summary pivot
             yr = pay["d"][:4] if pay.get("d") else "Unknown"
@@ -611,6 +660,10 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
                     "event_code": pay["c"],
                     "event_description": pay.get("desc", ""),
                     "claimed_status": pay_status,
+                    "fee_category": pay.get("cat"),
+                    "amount_paid": pay_paid,
+                    "large_rate": pay_large,
+                    "underpayment": pay_delta,
                     "origin_code": origin_code,
                     "origin_date": origin_date,
                 })
@@ -637,6 +690,19 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
             "large_10y": kpi_large_10y,
             "total_10y": kpi_small_10y + kpi_micro_10y + kpi_large_10y,
             "apps_with_findings_10y": len(apps_with_findings_10y),
+            # Dollar KPIs
+            "total_paid": kpi_total_paid,
+            "total_large_rate": kpi_total_large,
+            "total_underpayment": kpi_total_delta,
+            "reduced_paid": kpi_reduced_paid,
+            "reduced_large_rate": kpi_reduced_large,
+            "reduced_underpayment": kpi_reduced_delta,
+            "total_paid_10y": kpi_total_paid_10y,
+            "total_large_rate_10y": kpi_total_large_10y,
+            "total_underpayment_10y": kpi_total_delta_10y,
+            "reduced_paid_10y": kpi_reduced_paid_10y,
+            "reduced_large_rate_10y": kpi_reduced_large_10y,
+            "reduced_underpayment_10y": kpi_reduced_delta_10y,
         },
         "cache_stats": {
             "from_cache": from_cache,
@@ -649,8 +715,10 @@ def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
     """Analyze prosecution payments for a list of application numbers.
 
     Returns dict: application_number → {segments, payments, small_count,
-    micro_count, large_count, filing_date}.
+    micro_count, large_count, filing_date, total_paid, total_large,
+    total_delta}.
     """
+    from utils.fee_schedule import calculate_payment_fees, IDS_TRIGGER_CODES
     params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
 
     # ── Query A: Status-change events (for building segments) ────
@@ -664,8 +732,9 @@ def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
     ORDER BY application_number, event_date ASC
     """
 
-    # ── Query B: Payment events ──────────────────────────────────
-    pay_in = ", ".join(f"'{c}'" for c in _PROS_PAYMENT_CODES)
+    # ── Query B: Payment events + IDS trigger codes ─────────────
+    all_query_codes = _PROS_PAYMENT_CODES + _IDS_TRIGGER_CODES
+    pay_in = ", ".join(f"'{c}'" for c in all_query_codes)
     pay_sql = f"""
     SELECT application_number, event_date, event_code, event_description
     FROM `{settings.pfw_transactions_table}`
@@ -747,15 +816,22 @@ def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
             "filing_date": filing_d,
         }
 
-    # Group payments by application
+    # Group ALL events by application (including IDS trigger codes for context)
+    all_events_by_app: Dict[str, list] = {}
     pay_by_app: Dict[str, list] = {}
+    ids_trigger_set = set(IDS_TRIGGER_CODES)
     for r in pay_rows:
         an = r["application_number"]
-        pay_by_app.setdefault(an, []).append({
+        ev = {
             "date": r["event_date"],
             "code": r["event_code"],
             "desc": r.get("event_description", ""),
-        })
+        }
+        all_events_by_app.setdefault(an, []).append(ev)
+        # Only include actual payment codes (not IDS trigger codes) in the
+        # payment list — trigger codes are context-only for IDS conditional
+        if r["event_code"] not in ids_trigger_set:
+            pay_by_app.setdefault(an, []).append(ev)
 
     # Classify each payment by segment
     for an in an_list:
@@ -788,6 +864,13 @@ def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
                 tl["micro_count"] += 1
             else:
                 tl["large_count"] += 1
+
+        # ── Fee calculation: enrich payments with dollar amounts ──
+        all_events = all_events_by_app.get(an, [])
+        tl["payments"] = calculate_payment_fees(tl["payments"], all_events)
+        tl["total_paid"] = sum(p.get("paid", 0) for p in tl["payments"])
+        tl["total_large"] = sum(p.get("large", 0) for p in tl["payments"])
+        tl["total_delta"] = sum(p.get("delta", 0) for p in tl["payments"])
 
     return results
 
@@ -824,6 +907,7 @@ def _save_prosecution_cache(results: Dict[str, dict]) -> None:
             "micro_count": tl.get("micro_count", 0),
             "large_count": tl.get("large_count", 0),
             "latest_event_date": latest,
+            "cache_version": _CACHE_VERSION,
         })
 
     # Delete any existing rows for these apps, then insert fresh
