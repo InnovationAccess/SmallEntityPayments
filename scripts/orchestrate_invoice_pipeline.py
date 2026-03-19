@@ -86,7 +86,7 @@ def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
           ON a.reel_frame = d.reel_frame
         WHERE UPPER(a.name) LIKE CONCAT('%', UPPER(@entity), '%')
     )
-    ORDER BY application_number
+    ORDER BY application_number DESC  -- most recent first (more actionable for monetization)
     """
 
     job_config = bigquery.QueryJobConfig(
@@ -152,7 +152,11 @@ def extract_single_doc(
     gcs_client: storage.Client,
     row: dict,
 ) -> dict:
-    """Extract data from a single downloaded PDF using pdfplumber.
+    """Extract data from a single downloaded PDF.
+
+    Strategy: Try pdfplumber first (free, fast) for PDFs with text layers.
+    Most USPTO payment PDFs are scanned images, so fall through to Gemini.
+    Gemini is the primary extraction method for these scanned docs.
 
     Returns: {gcs_path, success, method}
     """
@@ -165,16 +169,23 @@ def extract_single_doc(
         blob = bucket.blob(gcs_path)
         pdf_bytes = blob.download_as_bytes()
 
-        # Try pdfplumber extraction
+        # Quick check: does PDF have a text layer? (most USPTO PDFs don't)
         extraction = extract_with_pdfplumber(pdf_bytes)
         if extraction:
-            # Update the existing row — delete and re-insert
             _update_extraction_status(
                 bq_client, app_number, gcs_path, extraction, "extracted"
             )
             return {"gcs_path": gcs_path, "success": True, "method": "pdfplumber"}
 
-        # Mark as failed for Gemini fallback
+        # Primary: Gemini Vision (handles scanned image PDFs)
+        extraction = extract_with_gemini(pdf_bytes)
+        if extraction:
+            _update_extraction_status(
+                bq_client, app_number, gcs_path, extraction, "extracted"
+            )
+            return {"gcs_path": gcs_path, "success": True, "method": "gemini"}
+
+        # Both failed
         _update_extraction_status(
             bq_client, app_number, gcs_path, None, "failed"
         )
@@ -366,92 +377,49 @@ def main():
     if unextracted:
         extracted_count = 0
         failed_count = 0
+        pdfplumber_count = 0
+        gemini_count = 0
 
-        # Use 10 parallel threads for extraction (no rate limits — all from GCS)
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {
-                executor.submit(extract_single_doc, bq_client, gcs_client, row): row
-                for row in unextracted
-            }
+        # Gemini free tier: ~1,500 requests/day = ~1 per minute to be safe
+        # But Vertex AI allows bursts. Use 2-second delay between Gemini calls.
+        # pdfplumber (text-layer PDFs) has no rate limit.
+        GEMINI_DELAY_SECONDS = 2
+        DAILY_GEMINI_LIMIT = 1400  # leave margin below 1,500
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result["success"]:
-                    extracted_count += 1
-                else:
-                    failed_count += 1
+        for i, row in enumerate(unextracted):
+            if gemini_count >= DAILY_GEMINI_LIMIT:
+                logger.info("Reached daily Gemini limit (%d). Stopping extraction. "
+                           "Re-run job to continue.", DAILY_GEMINI_LIMIT)
+                break
 
-                total_done = extracted_count + failed_count
-                if total_done % 100 == 0 or total_done == len(unextracted):
-                    logger.info(
-                        "Extraction progress: %d/%d done (%d extracted, %d failed)",
-                        total_done, len(unextracted), extracted_count, failed_count,
-                    )
-                    update_pipeline_status(
-                        bq_client, ENTITY_NAME, "extracting",
-                        total_apps=len(all_apps),
-                        downloaded_apps=len(all_apps),
-                        extracted_docs=extracted_count,
-                        failed_docs=failed_count,
-                    )
+            result = extract_single_doc(bq_client, gcs_client, row)
+            if result["success"]:
+                extracted_count += 1
+                if result["method"] == "pdfplumber":
+                    pdfplumber_count += 1
+                elif result["method"] == "gemini":
+                    gemini_count += 1
+                    time.sleep(GEMINI_DELAY_SECONDS)  # rate limit Gemini calls
+            else:
+                failed_count += 1
 
-        logger.info("Extraction complete: %d extracted, %d failed", extracted_count, failed_count)
+            total_done = extracted_count + failed_count
+            if total_done % 50 == 0 or total_done == len(unextracted):
+                logger.info(
+                    "Extraction progress: %d/%d done (%d extracted [%d pdfplumber, %d gemini], %d failed)",
+                    total_done, len(unextracted), extracted_count, pdfplumber_count,
+                    gemini_count, failed_count,
+                )
+                update_pipeline_status(
+                    bq_client, ENTITY_NAME, "extracting",
+                    total_apps=len(all_apps),
+                    downloaded_apps=len(all_apps),
+                    extracted_docs=extracted_count,
+                    failed_docs=failed_count,
+                )
 
-    # ── Phase 3: GEMINI FALLBACK ──────────────────────────────────
-
-    if not SKIP_GEMINI:
-        # Get failed docs
-        fail_query = """
-        SELECT application_number, gcs_path, doc_code, mail_date
-        FROM `uspto-data-app.uspto_data.invoice_extractions`
-        WHERE extraction_status = 'failed'
-          AND application_number IN UNNEST(@apps)
-        """
-        failed_rows = [dict(r) for r in bq_client.query(fail_query, job_config=job_config).result()]
-        logger.info("Phase 3: %d documents need Gemini fallback", len(failed_rows))
-
-        if failed_rows:
-            update_pipeline_status(
-                bq_client, ENTITY_NAME, "gemini_fallback",
-                total_apps=len(all_apps),
-                downloaded_apps=len(all_apps),
-                failed_docs=len(failed_rows),
-            )
-
-            gemini_success = 0
-            gemini_fail = 0
-
-            # Process sequentially — Gemini free tier is rate-limited
-            # ~1,500 requests/day = ~1 per minute to be safe, but we'll do faster
-            # and handle rate limits
-            for i, row in enumerate(failed_rows):
-                if i >= 1500:
-                    logger.info("Reached Gemini daily limit (1,500). Re-run job for remaining.")
-                    break
-
-                result = gemini_extract_single(bq_client, gcs_client, row)
-                if result["success"]:
-                    gemini_success += 1
-                else:
-                    gemini_fail += 1
-
-                # Rate limit: 2 seconds between Gemini calls
-                time.sleep(2)
-
-                if (i + 1) % 50 == 0:
-                    logger.info(
-                        "Gemini progress: %d/%d (%d recovered, %d still failed)",
-                        i + 1, len(failed_rows), gemini_success, gemini_fail,
-                    )
-                    update_pipeline_status(
-                        bq_client, ENTITY_NAME, "gemini_fallback",
-                        total_apps=len(all_apps),
-                        downloaded_apps=len(all_apps),
-                        failed_docs=len(failed_rows) - gemini_success,
-                        gemini_recovered=gemini_success,
-                    )
-
-            logger.info("Gemini fallback complete: %d recovered, %d still failed", gemini_success, gemini_fail)
+        logger.info("Extraction complete: %d extracted (%d pdfplumber, %d gemini), %d failed",
+                    extracted_count, pdfplumber_count, gemini_count, failed_count)
 
     # ── Final summary ─────────────────────────────────────────────
 
