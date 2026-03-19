@@ -585,36 +585,59 @@ def save_extraction(
     gcs_path: str,
     extraction_status: str = "extracted",
 ):
-    """Save a download/extraction record to invoice_extractions."""
+    """Save a download/extraction record to invoice_extractions via DML INSERT.
+
+    Uses DML INSERT (not streaming insert_rows_json) so rows go directly
+    to managed storage. This avoids the 30-minute streaming buffer that
+    blocks subsequent UPDATE/DELETE operations.
+    """
     fees = []
     if extraction:
         fees = extraction.get("fees", [])
     fees_json = json.dumps(fees) if isinstance(fees, list) else "[]"
 
-    row = {
-        "application_number": app_number,
-        "gcs_path": gcs_path,
-        "doc_code": doc_meta.get("doc_code", ""),
-        "doc_description": doc_meta.get("description", ""),
-        "doc_description_text": doc_meta.get("description", ""),
-        "mail_date": doc_meta.get("mail_date"),
-        "page_count": doc_meta.get("page_count"),
-        "extraction_status": extraction_status,
-        "entity_status": extraction.get("entity_status") if extraction else None,
-        "fees_json": fees_json,
-        "total_amount": extraction.get("total_amount") if extraction else None,
-        "extraction_method": extraction.get("extraction_method", "") if extraction else "",
-        "extraction_model": extraction.get("extraction_model", "") if extraction else "",
-        "extracted_at": datetime.now(timezone.utc).isoformat(),
-        "raw_response": extraction.get("raw_response", "") if extraction else "",
-    }
+    now = datetime.now(timezone.utc).isoformat()
 
-    table_ref = bq_client.dataset("uspto_data").table("invoice_extractions")
-    errs = bq_client.insert_rows_json(table_ref, [row])
-    if errs:
-        logger.warning("BQ insert error for %s/%s: %s", app_number, gcs_path, errs)
+    query = """
+    INSERT INTO `uspto-data-app.uspto_data.invoice_extractions`
+      (application_number, gcs_path, doc_code, doc_description, doc_description_text,
+       mail_date, page_count, extraction_status, entity_status, fees_json,
+       total_amount, extraction_method, extraction_model, extracted_at, raw_response)
+    VALUES
+      (@app, @gcs_path, @doc_code, @doc_desc, @doc_desc_text,
+       @mail_date, @page_count, @status, @entity_status, @fees_json,
+       @total_amount, @method, @model, @now, @raw_response)
+    """
+    from google.cloud import bigquery as bq
+    params = [
+        bq.ScalarQueryParameter("app", "STRING", app_number),
+        bq.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
+        bq.ScalarQueryParameter("doc_code", "STRING", doc_meta.get("doc_code", "")),
+        bq.ScalarQueryParameter("doc_desc", "STRING", doc_meta.get("description", "")),
+        bq.ScalarQueryParameter("doc_desc_text", "STRING", doc_meta.get("description", "")),
+        bq.ScalarQueryParameter("mail_date", "STRING", doc_meta.get("mail_date")),
+        bq.ScalarQueryParameter("page_count", "INT64", doc_meta.get("page_count")),
+        bq.ScalarQueryParameter("status", "STRING", extraction_status),
+        bq.ScalarQueryParameter("entity_status", "STRING",
+                                extraction.get("entity_status") if extraction else None),
+        bq.ScalarQueryParameter("fees_json", "STRING", fees_json),
+        bq.ScalarQueryParameter("total_amount", "FLOAT64",
+                                extraction.get("total_amount") if extraction else None),
+        bq.ScalarQueryParameter("method", "STRING",
+                                extraction.get("extraction_method", "") if extraction else ""),
+        bq.ScalarQueryParameter("model", "STRING",
+                                extraction.get("extraction_model", "") if extraction else ""),
+        bq.ScalarQueryParameter("now", "STRING", now),
+        bq.ScalarQueryParameter("raw_response", "STRING",
+                                extraction.get("raw_response", "") if extraction else ""),
+    ]
+    job_config = bq.QueryJobConfig(query_parameters=params)
+    try:
+        bq_client.query(query, job_config=job_config).result()
+        return True
+    except Exception as e:
+        logger.warning("BQ DML insert error for %s/%s: %s", app_number, gcs_path, e)
         return False
-    return True
 
 
 def get_downloaded_apps(bq_client, app_numbers: List[str]) -> Set[str]:
