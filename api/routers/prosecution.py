@@ -1535,17 +1535,30 @@ def get_invoice_docs(
         return {"application_number": application_number, "total": 0, "docs": [],
                 "error": str(e)}
 
-    # Check GCS for cached copies
+    # Check GCS for cached copies.
+    # NOTE: USPTO API returns different download identifiers (random strings)
+    # each call, so exact filename match won't work for previously-cached PDFs.
+    # Instead, list all blobs in the app directory and match by doc_code.
     if docs:
         try:
             gcs_client = storage.Client()
             bucket_obj = gcs_client.bucket(GCS_BUCKET)
+            prefix = f"{GCS_INVOICE_PREFIX}/{application_number}/"
+            existing_blobs = {}  # doc_code -> [blob_name, ...]
+            for blob in bucket_obj.list_blobs(prefix=prefix):
+                # Filename format: {app}_{docCode}_{identifier}.pdf
+                parts = blob.name.rsplit("/", 1)[-1].split("_", 2)
+                if len(parts) >= 2:
+                    code = parts[1]
+                    existing_blobs.setdefault(code, []).append(blob.name)
+
             for doc in docs:
-                gcs_path = f"{GCS_INVOICE_PREFIX}/{application_number}/{doc['filename']}"
-                blob = bucket_obj.blob(gcs_path)
-                if blob.exists():
+                code = doc.get("doc_code", "")
+                cached_list = existing_blobs.get(code, [])
+                if cached_list:
                     doc["cached"] = True
-                    doc["gcs_path"] = gcs_path
+                    # Use the first matching cached blob for serving
+                    doc["cached_gcs_path"] = cached_list.pop(0)
         except Exception:
             pass  # GCS check is best-effort
 
@@ -1561,10 +1574,12 @@ def get_invoice_pdf(
     application_number: str = Query(..., description="Application number"),
     download_url: str = Query(..., description="USPTO download URL"),
     filename: str = Query(..., description="PDF filename"),
+    cached_gcs_path: Optional[str] = Query(None, description="Pre-resolved GCS path for cached PDF"),
 ) -> Dict[str, Any]:
     """Download a payment invoice PDF to GCS (if not cached) and return a signed URL.
 
     The signed URL expires after 1 hour and can be opened directly in the browser.
+    If cached_gcs_path is provided (from invoice-docs cache check), uses that directly.
     """
     from datetime import timedelta
 
@@ -1573,11 +1588,43 @@ def get_invoice_pdf(
     try:
         gcs_client = storage.Client()
         bucket_obj = gcs_client.bucket(GCS_BUCKET)
-        blob = bucket_obj.blob(gcs_path)
 
+        # If a pre-resolved cached path was provided, use it directly
+        if cached_gcs_path:
+            blob = bucket_obj.blob(cached_gcs_path)
+            if blob.exists():
+                signed_url = blob.generate_signed_url(
+                    version="v4",
+                    expiration=timedelta(hours=1),
+                    method="GET",
+                )
+                return {
+                    "application_number": application_number,
+                    "filename": filename,
+                    "gcs_path": cached_gcs_path,
+                    "signed_url": signed_url,
+                    "cached": True,
+                }
+
+        # Check exact path first
+        blob = bucket_obj.blob(gcs_path)
         cached = blob.exists()
 
-        # Download from USPTO if not cached
+        # If not found by exact name, search by doc_code prefix
+        # (USPTO returns different download identifiers each API call)
+        if not cached:
+            # Extract doc_code from filename: {app}_{docCode}_{identifier}.pdf
+            parts = filename.split("_", 2)
+            if len(parts) >= 2:
+                doc_code = parts[1]
+                prefix = f"{GCS_INVOICE_PREFIX}/{application_number}/{application_number}_{doc_code}_"
+                for existing_blob in bucket_obj.list_blobs(prefix=prefix, max_results=1):
+                    blob = existing_blob
+                    gcs_path = existing_blob.name
+                    cached = True
+                    break
+
+        # Download from USPTO if still not cached
         if not cached:
             with httpx.Client(timeout=60, follow_redirects=True) as client:
                 resp = client.get(download_url, headers={

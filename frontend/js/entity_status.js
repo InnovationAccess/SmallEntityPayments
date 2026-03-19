@@ -2308,7 +2308,7 @@ async function showInvoicePopup(applicationNumber) {
 
   try {
     const data = await apiGet(`/api/prosecution/invoice-docs?application_number=${encodeURIComponent(applicationNumber)}`);
-    const docs = data.documents || [];
+    const docs = data.docs || [];
 
     const body = popup.querySelector('.es-invoice-body');
     if (docs.length === 0) {
@@ -2330,6 +2330,7 @@ async function showInvoicePopup(applicationNumber) {
                   data-app="${escHtml(applicationNumber)}"
                   data-url="${escHtml(doc.download_url || '')}"
                   data-filename="${escHtml(doc.filename || '')}"
+                  data-cached-path="${escHtml(doc.cached_gcs_path || '')}"
                   title="View PDF">View</button>
         </td>
       </tr>`;
@@ -2360,6 +2361,9 @@ async function showInvoicePopup(applicationNumber) {
             download_url: btn.dataset.url,
             filename: btn.dataset.filename,
           });
+          if (btn.dataset.cachedPath) {
+            params.set('cached_gcs_path', btn.dataset.cachedPath);
+          }
           const result = await apiGet(`/api/prosecution/invoice-pdf?${params}`);
           if (result.signed_url) {
             window.open(result.signed_url, '_blank');
