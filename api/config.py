@@ -124,5 +124,13 @@ class Settings:
     def entity_prosecution_cache_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.entity_prosecution_cache"
 
+    @property
+    def invoice_extractions_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.invoice_extractions"
+
+    @property
+    def invoice_calibration_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.invoice_calibration"
+
 
 settings = Settings()

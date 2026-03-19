@@ -1740,6 +1740,7 @@ function renderProsecutionDetailTable(data) {
             <th data-sort-key="8">Fee Category</th>
             <th data-sort-key="9">Origin Code</th>
             <th data-sort-key="10">Origin Date</th>
+            <th data-sort-key="11" style="text-align:center">Invoice</th>
           </tr></thead><tbody>`;
 
   for (const d of details) {
@@ -1759,6 +1760,7 @@ function renderProsecutionDetailTable(data) {
       <td>${escHtml(catLabel)}</td>
       <td>${escHtml(d.origin_code || '')}</td>
       <td>${escHtml(d.origin_date || '')}</td>
+      <td style="text-align:center"><button class="es-invoice-btn" data-app="${escHtml(d.application_number || '')}" title="View payment invoices">&#x1F4C4;</button></td>
     </tr>`;
   }
 
@@ -1772,6 +1774,11 @@ function renderProsecutionDetailTable(data) {
     enableTableSorting(tbl);
     addColumnPicker(tbl);
   }
+
+  // Wire up invoice buttons
+  wrap.querySelectorAll('.es-invoice-btn').forEach(btn => {
+    btn.addEventListener('click', () => showInvoicePopup(btn.dataset.app));
+  });
 }
 
 // ── Patent Table Filtering (for clickable KPIs) ─────────────────
@@ -2233,6 +2240,148 @@ function showMicroChartLegend() {
   }
 
   legend.classList.remove('hidden');
+}
+
+// ── Invoice Popup ────────────────────────────────────────────────
+
+let _invoicePopup = null;
+let _invoiceDrag = null;
+
+function getOrCreateInvoicePopup() {
+  if (_invoicePopup) return _invoicePopup;
+  const el = document.createElement('div');
+  el.id = 'es-invoice-popup';
+  el.className = 'es-invoice-popup hidden';
+  document.body.appendChild(el);
+  _invoicePopup = el;
+
+  // Drag support on header
+  el.addEventListener('mousedown', e => {
+    const hdr = e.target.closest('.es-invoice-header');
+    if (!hdr || e.target.closest('.es-invoice-close')) return;
+    e.preventDefault();
+    _invoiceDrag = {
+      startX: e.clientX, startY: e.clientY,
+      origLeft: el.offsetLeft, origTop: el.offsetTop,
+    };
+  });
+  document.addEventListener('mousemove', e => {
+    if (!_invoiceDrag) return;
+    e.preventDefault();
+    el.style.left = `${_invoiceDrag.origLeft + (e.clientX - _invoiceDrag.startX)}px`;
+    el.style.top  = `${_invoiceDrag.origTop  + (e.clientY - _invoiceDrag.startY)}px`;
+  });
+  document.addEventListener('mouseup', () => { _invoiceDrag = null; });
+
+  return el;
+}
+
+function closeInvoicePopup() {
+  const popup = getOrCreateInvoicePopup();
+  popup.classList.add('hidden');
+}
+
+async function showInvoicePopup(applicationNumber) {
+  if (!applicationNumber) return;
+  const popup = getOrCreateInvoicePopup();
+
+  // Position popup in center of viewport
+  const vpW = window.innerWidth;
+  const vpH = window.innerHeight;
+  const w = Math.min(720, vpW - 40);
+  const h = Math.min(520, vpH - 40);
+  popup.style.width  = `${w}px`;
+  popup.style.height = `${h}px`;
+  popup.style.left   = `${(vpW - w) / 2 + window.scrollX}px`;
+  popup.style.top    = `${(vpH - h) / 2 + window.scrollY}px`;
+
+  popup.innerHTML = `
+    <div class="es-invoice-header">
+      <span>Payment Invoices \u2014 ${escHtml(applicationNumber)}</span>
+      <button class="es-invoice-close" title="Close">\u00D7</button>
+    </div>
+    <div class="es-invoice-body">
+      <p class="text-muted">Loading documents\u2026</p>
+    </div>`;
+  popup.classList.remove('hidden');
+  popup.querySelector('.es-invoice-close').addEventListener('click', closeInvoicePopup);
+
+  try {
+    const data = await apiGet(`/api/prosecution/invoice-docs?application_number=${encodeURIComponent(applicationNumber)}`);
+    const docs = data.documents || [];
+
+    const body = popup.querySelector('.es-invoice-body');
+    if (docs.length === 0) {
+      body.innerHTML = '<p class="text-muted">No payment documents found for this application.</p>';
+      return;
+    }
+
+    let rows = '';
+    for (const doc of docs) {
+      const cached = doc.cached ? '<span class="es-invoice-cached" title="Already downloaded">&#x2713;</span>' : '';
+      rows += `<tr>
+        <td>${escHtml(doc.mail_date || '')}</td>
+        <td>${escHtml(doc.doc_code || '')}</td>
+        <td>${escHtml(doc.description || '')}</td>
+        <td style="text-align:center">${doc.page_count || ''}</td>
+        <td style="text-align:center">${cached}</td>
+        <td style="text-align:center">
+          <button class="es-invoice-view-btn"
+                  data-app="${escHtml(applicationNumber)}"
+                  data-url="${escHtml(doc.download_url || '')}"
+                  data-filename="${escHtml(doc.filename || '')}"
+                  title="View PDF">View</button>
+        </td>
+      </tr>`;
+    }
+
+    body.innerHTML = `
+      <p class="text-muted" style="margin:0 0 .5rem">${docs.length} payment document(s) found</p>
+      <div class="es-invoice-table-wrap">
+        <table class="data-table es-invoice-doc-table">
+          <thead><tr>
+            <th>Date</th><th>Code</th><th>Description</th>
+            <th style="text-align:center">Pages</th>
+            <th style="text-align:center">Cached</th>
+            <th style="text-align:center">Action</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+
+    // Wire up View PDF buttons
+    body.querySelectorAll('.es-invoice-view-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'Loading\u2026';
+        try {
+          const params = new URLSearchParams({
+            application_number: btn.dataset.app,
+            download_url: btn.dataset.url,
+            filename: btn.dataset.filename,
+          });
+          const result = await apiGet(`/api/prosecution/invoice-pdf?${params}`);
+          if (result.signed_url) {
+            window.open(result.signed_url, '_blank');
+          }
+          btn.textContent = 'View';
+          btn.disabled = false;
+          // Mark as cached after first download
+          const cachedCell = btn.closest('tr').querySelector('td:nth-child(5)');
+          if (cachedCell && !cachedCell.querySelector('.es-invoice-cached')) {
+            cachedCell.innerHTML = '<span class="es-invoice-cached" title="Already downloaded">&#x2713;</span>';
+          }
+        } catch (err) {
+          btn.textContent = 'Error';
+          btn.disabled = false;
+          console.error('Invoice PDF error:', err);
+        }
+      });
+    });
+  } catch (err) {
+    const body = popup.querySelector('.es-invoice-body');
+    body.innerHTML = `<p style="color:var(--color-danger)">Error loading documents: ${escHtml(err.message)}</p>`;
+  }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
