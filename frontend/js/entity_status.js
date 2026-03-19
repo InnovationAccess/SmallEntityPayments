@@ -1302,8 +1302,8 @@ async function fetchProsecutionPayments() {
   if (statusEl) statusEl.textContent = `Analyzing ${allApps.length.toLocaleString()} applications...`;
 
   try {
-    // Batch into groups of 200
-    const BATCH = 200;
+    // Batch into groups of 1000
+    const BATCH = 1000;
     const batches = [];
     for (let i = 0; i < allApps.length; i += BATCH) {
       batches.push(allApps.slice(i, i + BATCH));

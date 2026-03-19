@@ -478,7 +478,7 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     re-analyzing applications that have already been processed.  Only
     uncached applications are queried from pfw_transactions.
 
-    Max 200 applications per request.
+    Max 1000 applications per request.
     """
     _dollar_kpi_zeros = {
         "total_paid": 0, "total_large_rate": 0, "total_underpayment": 0,
@@ -497,7 +497,7 @@ def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any
     if not req.application_numbers:
         return empty
 
-    an_list = req.application_numbers[:200]
+    an_list = req.application_numbers[:1000]
 
     # ── Step 1: Check cache ──────────────────────────────────────
     cache_params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
