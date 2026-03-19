@@ -14,7 +14,10 @@ Payment code families:
 
 from __future__ import annotations
 
+import json
+import logging
 import sys
+from datetime import date as _date, datetime as _datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -29,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from utils.patent_number import normalize_patent_number
 
 router = APIRouter(prefix="/api/entity-status", tags=["Entity Status"])
+log = logging.getLogger(__name__)
 
 # ── SQL fragment: derive entity status from event_code ────────────
 # Used in all queries instead of trusting the entity_status column.
@@ -60,6 +64,49 @@ class ApplicantRequest(BaseModel):
 
 class BulkTimelineRequest(BaseModel):
     patent_numbers: List[str]
+
+
+class ProsecutionTimelinesRequest(BaseModel):
+    application_numbers: List[str]
+
+
+# ── Prosecution Payment Analysis Constants ────────────────────────
+
+# Status-change event codes → new entity status
+_PROS_STATUS_CODES = {
+    # → SMALL
+    'SES': 'SMALL', 'SMAL': 'SMALL', 'P013': 'SMALL', 'MP013': 'SMALL',
+    'MSML': 'SMALL', 'NOSE': 'SMALL', 'MRNSME': 'SMALL',
+    # → MICRO
+    'MICR': 'MICRO', 'MENC': 'MICRO', 'PMRIA': 'MICRO', 'MPMRIA': 'MICRO',
+    # → LARGE
+    'BIG.': 'LARGE', 'P014': 'LARGE', 'MP014': 'LARGE',
+}
+
+# All 102 prosecution payment event codes
+_PROS_PAYMENT_CODES = [
+    'A.I.', 'A.LA', 'A.NQ', 'A.NR', 'A.PE', 'A371', 'AABR', 'ABN/',
+    'ABN6', 'ABN9', 'ABNF', 'ACKNAHA', 'ADDDWRG', 'ADDFLFEE', 'ADDSPEC',
+    'AFNE', 'AP.B', 'AP.C', 'AP.C3', 'AP/A', 'APBD', 'APBI', 'APBR',
+    'APCA', 'APCD', 'APCP', 'APCR', 'APE2', 'APEA', 'APFC', 'APHT',
+    'APND', 'APNH', 'APNH.CA', 'APNH.CO', 'APNH.MI', 'APNH.TX',
+    'APNH.VA', 'APOH', 'APRD', 'APRR', 'ARBP', 'BRCE', 'C610', 'C9DE',
+    'C9GR', 'CPA-AMD', 'DIST', 'FEE.', 'FLFEE', 'FRCE', 'IDS.',
+    'IDSPTA', 'IFEE', 'IFEEHA', 'IRCE', 'J521', 'JA94', 'JA95', 'JS13',
+    'MABN6', 'MAPHT', 'MCPA-AMD', 'MODPD28', 'MODPD33', 'MP005',
+    'MP020', 'MQRCE', 'MRAPD', 'MRAPS', 'MRXEAS', 'MRXG.', 'MRXTG',
+    'MSML', 'N/AP', 'N/AP-NOA', 'N084', 'NOIFIBHA', 'ODPD28', 'ODPD33',
+    'ODPET4', 'P003', 'P005', 'P007', 'P010', 'P012', 'P020', 'P131',
+    'P138', 'PFP', 'PMFP', 'QRCE', 'RCEX', 'RETF', 'RVIFEEHA',
+    'RXIDS.R', 'RXRQ/T', 'RXSAPB', 'RXXT/G', 'TDP', 'VFEE', 'XT/G',
+]
+
+# IDS trigger codes — needed to determine if IDS filing requires a fee
+# (IDS is only a PAY event if filed after Final Office Action or NOA)
+_IDS_TRIGGER_CODES = ['CTFR', 'MS95', 'NOA', 'MAILNOA', 'D.ISS']
+
+# Cache version — bumped when fee calculation logic changes
+_CACHE_VERSION = 2
 
 
 # ── Endpoints ─────────────────────────────────────────────────────
@@ -423,6 +470,466 @@ def get_bulk_timelines(req: BulkTimelineRequest) -> Dict[str, Any]:
     }
 
 
+@router.post("/prosecution-timelines")
+def get_prosecution_timelines(req: ProsecutionTimelinesRequest) -> Dict[str, Any]:
+    """Prosecution payment analysis: status segments + payment events.
+
+    Uses a BigQuery cache table (prosecution_payment_cache) to avoid
+    re-analyzing applications that have already been processed.  Only
+    uncached applications are queried from pfw_transactions.
+
+    Max 200 applications per request.
+    """
+    _dollar_kpi_zeros = {
+        "total_paid": 0, "total_large_rate": 0, "total_underpayment": 0,
+        "reduced_paid": 0, "reduced_large_rate": 0, "reduced_underpayment": 0,
+        "total_paid_10y": 0, "total_large_rate_10y": 0, "total_underpayment_10y": 0,
+        "reduced_paid_10y": 0, "reduced_large_rate_10y": 0, "reduced_underpayment_10y": 0,
+    }
+    empty = {"timelines": {}, "date_range": None,
+             "payments_detail": [], "summary": {},
+             "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
+                      "apps_with_findings": 0,
+                      "small_10y": 0, "micro_10y": 0, "large_10y": 0,
+                      "total_10y": 0, "apps_with_findings_10y": 0,
+                      **_dollar_kpi_zeros},
+             "cache_stats": {"from_cache": 0, "freshly_analyzed": 0}}
+    if not req.application_numbers:
+        return empty
+
+    an_list = req.application_numbers[:200]
+
+    # ── Step 1: Check cache ──────────────────────────────────────
+    cache_params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
+    cache_sql = f"""
+    SELECT application_number, segments, payments,
+           small_count, micro_count, large_count, filing_date
+    FROM `{settings.prosecution_payment_cache_table}`
+    WHERE application_number IN UNNEST(@an_list)
+      AND cache_version = {_CACHE_VERSION}
+    """
+    cache_rows = bq_service.run_query(cache_sql, cache_params)
+
+    cached: Dict[str, dict] = {}
+    for r in cache_rows:
+        an = r["application_number"]
+        cached[an] = {
+            "segments": json.loads(r["segments"]) if r.get("segments") else [],
+            "payments": json.loads(r["payments"]) if r.get("payments") else [],
+            "small_count": r.get("small_count", 0),
+            "micro_count": r.get("micro_count", 0),
+            "large_count": r.get("large_count", 0),
+            "filing_date": r.get("filing_date"),
+        }
+
+    uncached = [an for an in an_list if an not in cached]
+    from_cache = len(cached)
+    freshly_analyzed = 0
+
+    # ── Step 2: Analyze uncached apps ────────────────────────────
+    fresh: Dict[str, dict] = {}
+    if uncached:
+        fresh = _analyze_prosecution_apps(uncached)
+        freshly_analyzed = len(fresh)
+
+        # ── Step 3: Save fresh results to cache ──────────────────
+        _save_prosecution_cache(fresh)
+
+    # ── Step 4: Merge cached + fresh, build response ─────────────
+    timelines: Dict[str, dict] = {}
+    payments_detail = []
+    summary: Dict[str, Dict[str, int]] = {}
+    kpi_small = 0
+    kpi_micro = 0
+    kpi_large = 0
+    kpi_small_10y = 0
+    kpi_micro_10y = 0
+    kpi_large_10y = 0
+    apps_with_findings: set = set()
+    apps_with_findings_10y: set = set()
+    # Dollar accumulators
+    kpi_total_paid = 0
+    kpi_total_large = 0
+    kpi_total_delta = 0
+    kpi_reduced_paid = 0      # Small+Micro only
+    kpi_reduced_large = 0
+    kpi_reduced_delta = 0
+    kpi_total_paid_10y = 0
+    kpi_total_large_10y = 0
+    kpi_total_delta_10y = 0
+    kpi_reduced_paid_10y = 0
+    kpi_reduced_large_10y = 0
+    kpi_reduced_delta_10y = 0
+    global_min = None
+    global_max = None
+    ten_yr_cutoff = _fmt_date(_date.today().replace(year=_date.today().year - 10))
+
+    def _update_range_str(d_str):
+        nonlocal global_min, global_max
+        if not d_str:
+            return
+        if global_min is None or d_str < global_min:
+            global_min = d_str
+        if global_max is None or d_str > global_max:
+            global_max = d_str
+
+    # Process all apps (from cache or fresh analysis)
+    for an in an_list:
+        if an in fresh:
+            tl = fresh[an]
+        elif an in cached:
+            tl = cached[an]
+        else:
+            continue  # app had no data in either source
+
+        timelines[an] = {"segments": tl["segments"], "payments": tl["payments"]}
+
+        # Update date range from segments
+        for seg in tl["segments"]:
+            _update_range_str(seg.get("start"))
+            _update_range_str(seg.get("end"))
+
+        # Count KPIs and build detail/summary from payments
+        for pay in tl["payments"]:
+            _update_range_str(pay.get("d"))
+            pay_status = pay.get("status", "LARGE")
+
+            pay_paid = pay.get("paid", 0)
+            pay_large = pay.get("large", 0)
+            pay_delta = pay.get("delta", 0)
+
+            if pay_status == "SMALL":
+                kpi_small += 1
+                apps_with_findings.add(an)
+            elif pay_status == "MICRO":
+                kpi_micro += 1
+                apps_with_findings.add(an)
+            else:
+                kpi_large += 1
+
+            # Dollar accumulators (all events with fees)
+            kpi_total_paid += pay_paid
+            kpi_total_large += pay_large
+            kpi_total_delta += pay_delta
+            if pay_status in ("SMALL", "MICRO"):
+                kpi_reduced_paid += pay_paid
+                kpi_reduced_large += pay_large
+                kpi_reduced_delta += pay_delta
+
+            # 10-year window KPIs
+            if pay.get("d") and pay["d"] >= ten_yr_cutoff:
+                if pay_status == "SMALL":
+                    kpi_small_10y += 1
+                    apps_with_findings_10y.add(an)
+                elif pay_status == "MICRO":
+                    kpi_micro_10y += 1
+                    apps_with_findings_10y.add(an)
+                else:
+                    kpi_large_10y += 1
+
+                kpi_total_paid_10y += pay_paid
+                kpi_total_large_10y += pay_large
+                kpi_total_delta_10y += pay_delta
+                if pay_status in ("SMALL", "MICRO"):
+                    kpi_reduced_paid_10y += pay_paid
+                    kpi_reduced_large_10y += pay_large
+                    kpi_reduced_delta_10y += pay_delta
+
+            # Summary pivot
+            yr = pay["d"][:4] if pay.get("d") else "Unknown"
+            if yr not in summary:
+                summary[yr] = {}
+            summary[yr][pay["c"]] = summary[yr].get(pay["c"], 0) + 1
+
+            # Detail record for Small + Micro
+            if pay_status in ("SMALL", "MICRO"):
+                # Find origin from segment
+                origin_code = None
+                origin_date = None
+                for seg in tl["segments"]:
+                    seg_start = seg.get("start")
+                    seg_end = seg.get("end")
+                    if seg_start and pay["d"] >= seg_start:
+                        if seg_end is None or pay["d"] < seg_end:
+                            origin_code = seg.get("trigger")
+                            origin_date = seg_start
+                            break
+                payments_detail.append({
+                    "application_number": an,
+                    "event_date": pay["d"],
+                    "event_code": pay["c"],
+                    "event_description": pay.get("desc", ""),
+                    "claimed_status": pay_status,
+                    "fee_category": pay.get("cat"),
+                    "amount_paid": pay_paid,
+                    "large_rate": pay_large,
+                    "underpayment": pay_delta,
+                    "origin_code": origin_code,
+                    "origin_date": origin_date,
+                })
+
+    log.info("Prosecution timelines: %d from cache, %d freshly analyzed",
+             from_cache, freshly_analyzed)
+
+    return {
+        "timelines": timelines,
+        "date_range": {
+            "min": global_min,
+            "max": global_max,
+        } if global_min and global_max else None,
+        "payments_detail": payments_detail,
+        "summary": summary,
+        "kpis": {
+            "small": kpi_small,
+            "micro": kpi_micro,
+            "large": kpi_large,
+            "total": kpi_small + kpi_micro + kpi_large,
+            "apps_with_findings": len(apps_with_findings),
+            "small_10y": kpi_small_10y,
+            "micro_10y": kpi_micro_10y,
+            "large_10y": kpi_large_10y,
+            "total_10y": kpi_small_10y + kpi_micro_10y + kpi_large_10y,
+            "apps_with_findings_10y": len(apps_with_findings_10y),
+            # Dollar KPIs
+            "total_paid": kpi_total_paid,
+            "total_large_rate": kpi_total_large,
+            "total_underpayment": kpi_total_delta,
+            "reduced_paid": kpi_reduced_paid,
+            "reduced_large_rate": kpi_reduced_large,
+            "reduced_underpayment": kpi_reduced_delta,
+            "total_paid_10y": kpi_total_paid_10y,
+            "total_large_rate_10y": kpi_total_large_10y,
+            "total_underpayment_10y": kpi_total_delta_10y,
+            "reduced_paid_10y": kpi_reduced_paid_10y,
+            "reduced_large_rate_10y": kpi_reduced_large_10y,
+            "reduced_underpayment_10y": kpi_reduced_delta_10y,
+        },
+        "cache_stats": {
+            "from_cache": from_cache,
+            "freshly_analyzed": freshly_analyzed,
+        },
+    }
+
+
+def _analyze_prosecution_apps(an_list: List[str]) -> Dict[str, dict]:
+    """Analyze prosecution payments for a list of application numbers.
+
+    Returns dict: application_number → {segments, payments, small_count,
+    micro_count, large_count, filing_date, total_paid, total_large,
+    total_delta}.
+    """
+    from utils.fee_schedule import calculate_payment_fees, IDS_TRIGGER_CODES
+    params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_list)]
+
+    # ── Query A: Status-change events (for building segments) ────
+    status_codes = list(_PROS_STATUS_CODES.keys())
+    status_in = ", ".join(f"'{c}'" for c in status_codes)
+    seg_sql = f"""
+    SELECT application_number, event_date, event_code
+    FROM `{settings.pfw_transactions_table}`
+    WHERE application_number IN UNNEST(@an_list)
+      AND event_code IN ({status_in})
+    ORDER BY application_number, event_date ASC
+    """
+
+    # ── Query B: Payment events + IDS trigger codes ─────────────
+    all_query_codes = _PROS_PAYMENT_CODES + _IDS_TRIGGER_CODES
+    pay_in = ", ".join(f"'{c}'" for c in all_query_codes)
+    pay_sql = f"""
+    SELECT application_number, event_date, event_code, event_description
+    FROM `{settings.pfw_transactions_table}`
+    WHERE application_number IN UNNEST(@an_list)
+      AND event_code IN ({pay_in})
+    ORDER BY application_number, event_date ASC
+    """
+
+    # ── Query C: Filing dates ─────────────────────────────────────
+    filing_sql = f"""
+    SELECT application_number, filing_date
+    FROM `{settings.patent_table}`
+    WHERE application_number IN UNNEST(@an_list)
+    """
+
+    seg_rows = bq_service.run_query(seg_sql, params)
+    pay_rows = bq_service.run_query(pay_sql, params)
+    filing_rows = bq_service.run_query(filing_sql, params)
+
+    # Build filing date lookup
+    filing_dates: Dict[str, _date] = {}
+    for r in filing_rows:
+        if r.get("filing_date"):
+            filing_dates[r["application_number"]] = r["filing_date"]
+
+    # Group status-change events by application
+    seg_by_app: Dict[str, list] = {}
+    for r in seg_rows:
+        an = r["application_number"]
+        seg_by_app.setdefault(an, []).append({
+            "date": r["event_date"],
+            "code": r["event_code"],
+            "status": _PROS_STATUS_CODES.get(r["event_code"], "LARGE"),
+        })
+
+    # Build segments per application
+    today = _date.today()
+    results: Dict[str, dict] = {}
+
+    for an in an_list:
+        filing_d = filing_dates.get(an)
+        changes = seg_by_app.get(an, [])
+        segments = []
+
+        if not changes:
+            start = filing_d or today
+            segments.append({
+                "status": "LARGE",
+                "start": _fmt_date(start),
+                "end": None,
+                "trigger": None,
+            })
+        else:
+            first_change_date = changes[0]["date"]
+            seg_start = filing_d or first_change_date
+            if seg_start < first_change_date:
+                segments.append({
+                    "status": "LARGE",
+                    "start": _fmt_date(seg_start),
+                    "end": _fmt_date(first_change_date),
+                    "trigger": None,
+                })
+
+            for i, ch in enumerate(changes):
+                end_date = changes[i + 1]["date"] if i + 1 < len(changes) else None
+                segments.append({
+                    "status": ch["status"],
+                    "start": _fmt_date(ch["date"]),
+                    "end": _fmt_date(end_date),
+                    "trigger": ch["code"],
+                })
+
+        results[an] = {
+            "segments": segments,
+            "payments": [],
+            "small_count": 0,
+            "micro_count": 0,
+            "large_count": 0,
+            "filing_date": filing_d,
+        }
+
+    # Group ALL events by application (including IDS trigger codes for context)
+    all_events_by_app: Dict[str, list] = {}
+    pay_by_app: Dict[str, list] = {}
+    ids_trigger_set = set(IDS_TRIGGER_CODES)
+    for r in pay_rows:
+        an = r["application_number"]
+        ev = {
+            "date": r["event_date"],
+            "code": r["event_code"],
+            "desc": r.get("event_description", ""),
+        }
+        all_events_by_app.setdefault(an, []).append(ev)
+        # Only include actual payment codes (not IDS trigger codes) in the
+        # payment list — trigger codes are context-only for IDS conditional
+        if r["event_code"] not in ids_trigger_set:
+            pay_by_app.setdefault(an, []).append(ev)
+
+    # Classify each payment by segment
+    for an in an_list:
+        if an not in results:
+            continue
+        tl = results[an]
+        payments = pay_by_app.get(an, [])
+
+        for pay in payments:
+            pay_date = pay["date"]
+            pay_status = "LARGE"
+            for seg in tl["segments"]:
+                seg_start = _date.fromisoformat(seg["start"]) if seg["start"] else None
+                seg_end = _date.fromisoformat(seg["end"]) if seg["end"] else None
+                if seg_start and pay_date >= seg_start:
+                    if seg_end is None or pay_date < seg_end:
+                        pay_status = seg["status"]
+                        break
+
+            tl["payments"].append({
+                "d": _fmt_date(pay_date),
+                "c": pay["code"],
+                "desc": pay["desc"],
+                "status": pay_status,
+            })
+
+            if pay_status == "SMALL":
+                tl["small_count"] += 1
+            elif pay_status == "MICRO":
+                tl["micro_count"] += 1
+            else:
+                tl["large_count"] += 1
+
+        # ── Fee calculation: enrich payments with dollar amounts ──
+        all_events = all_events_by_app.get(an, [])
+        tl["payments"] = calculate_payment_fees(tl["payments"], all_events)
+        tl["total_paid"] = sum(p.get("paid", 0) for p in tl["payments"])
+        tl["total_large"] = sum(p.get("large", 0) for p in tl["payments"])
+        tl["total_delta"] = sum(p.get("delta", 0) for p in tl["payments"])
+
+    return results
+
+
+def _save_prosecution_cache(results: Dict[str, dict]) -> None:
+    """Save analyzed prosecution payment results to BigQuery cache table."""
+    if not results:
+        return
+
+    client = bq_service.client
+    table_ref = settings.prosecution_payment_cache_table
+    now = _datetime.utcnow().isoformat()
+
+    rows_to_insert = []
+    for an, tl in results.items():
+        # Find latest event date across segments and payments
+        latest = None
+        for seg in tl["segments"]:
+            if seg.get("start") and (latest is None or seg["start"] > latest):
+                latest = seg["start"]
+            if seg.get("end") and (latest is None or seg["end"] > latest):
+                latest = seg["end"]
+        for pay in tl["payments"]:
+            if pay.get("d") and (latest is None or pay["d"] > latest):
+                latest = pay["d"]
+
+        rows_to_insert.append({
+            "application_number": an,
+            "analyzed_at": now,
+            "filing_date": _fmt_date(tl.get("filing_date")),
+            "segments": json.dumps(tl["segments"]),
+            "payments": json.dumps(tl["payments"]),
+            "small_count": tl.get("small_count", 0),
+            "micro_count": tl.get("micro_count", 0),
+            "large_count": tl.get("large_count", 0),
+            "latest_event_date": latest,
+            "cache_version": _CACHE_VERSION,
+        })
+
+    # Delete any existing rows for these apps, then insert fresh
+    an_delete = list(results.keys())
+    del_params = [bigquery.ArrayQueryParameter("an_list", "STRING", an_delete)]
+    del_sql = f"""
+    DELETE FROM `{table_ref}`
+    WHERE application_number IN UNNEST(@an_list)
+    """
+    try:
+        bq_service.run_query(del_sql, del_params)
+    except Exception:
+        pass  # table might be empty
+
+    # Insert in batches of 500
+    for i in range(0, len(rows_to_insert), 500):
+        batch = rows_to_insert[i:i + 500]
+        errors = client.insert_rows_json(table_ref, batch)
+        if errors:
+            log.error("Cache insert errors: %s", errors[:3])
+
+
 @router.post("/by-applicant")
 def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     """Full portfolio analysis for an entity — prosecution AND post-grant.
@@ -462,11 +969,10 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         SELECT d.application_number
         FROM `{settings.assign_documents_table}` d
         JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+        JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
         WHERE a.assignee_name IN ({name_in})
           AND d.application_number IS NOT NULL
-        UNION DISTINCT
-        SELECT application_number FROM `{settings.patent_table}`
-        WHERE first_applicant_name IN ({name_in})
+          AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
       )
     )
     SELECT
@@ -484,7 +990,13 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "expanded_names": expanded,
             "total_patents": 0,
             "total_applications": 0,
+            "divested_count": 0,
+            "acquired_count": 0,
             "sold_count": 0,
+            "portfolio": {
+                "granted": {"filed": 0, "acquired": 0, "divested": 0, "expired": 0, "owned": 0},
+                "pending": {"filed": 0, "acquired": 0, "divested": 0, "owned": 0},
+            },
             "prosecution": {"small": 0, "large": 0, "micro": 0, "total": 0,
                            "small_10y": 0, "large_10y": 0, "micro_10y": 0, "total_10y": 0},
             "post_grant": {
@@ -511,18 +1023,62 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
 
     # ── Query 2: Post-grant events (maintenance_fee_events_v2) ─────
     # Payment codes derive entity status; also count declarations and transitions.
-    pg_params = [
-        bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums),
-    ]
+    # Filtered by ownership window: only events during the entity's ownership
+    # period are counted (after acquisition, before divestiture).
+    pg_params = list(params)  # include name params for ownership CTE
+    pg_params.append(bigquery.ArrayQueryParameter("pn_list", "STRING", pat_nums))
+    pg_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
     postgrant_sql = f"""
-    -- CTE avoids illegal aggregation-of-aggregation for change_date
-    WITH base AS (
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    ),
+    ownership AS (
+      SELECT pfw.patent_number, aa.acquired_date, dv.divested_date
+      FROM `{settings.patent_table}` pfw
+      LEFT JOIN acquired_via_assign aa ON aa.application_number = pfw.application_number
+      LEFT JOIN divested dv ON dv.application_number = pfw.application_number
+      WHERE pfw.patent_number IN UNNEST(@pn_list)
+    ),
+    base AS (
       SELECT
         m.patent_number,
         m.event_code,
         m.event_date,
-        {DERIVE_STATUS_SQL} AS derived_status
+        {DERIVE_STATUS_SQL} AS derived_status,
+        CASE WHEN m.event_date >= COALESCE(ow.acquired_date, DATE '0001-01-01')
+              AND m.event_date <  COALESCE(ow.divested_date, DATE '9999-12-31')
+             THEN TRUE ELSE FALSE END AS during_ownership
       FROM `{settings.maintenance_table}` m
+      LEFT JOIN ownership ow ON ow.patent_number = m.patent_number
       WHERE m.patent_number IN UNNEST(@pn_list)
         AND (
           {DERIVE_STATUS_SQL} IS NOT NULL
@@ -534,35 +1090,38 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         patent_number,
         ARRAY_AGG(derived_status IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)] AS first_status
       FROM base
+      WHERE during_ownership
       GROUP BY patent_number
     )
     SELECT
       b.patent_number,
-      f.first_status                                                          AS first_maint_status,
-      ARRAY_AGG(b.derived_status IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
-      COUNTIF(b.event_code = 'BIG.')  AS decl_big,
-      COUNTIF(b.event_code = 'SMAL')  AS decl_smal,
-      COUNTIF(b.event_code = 'MICR')  AS decl_micr,
-      COUNTIF(b.event_code = 'STOL')  AS trans_stol,
-      COUNTIF(b.event_code = 'LTOS')  AS trans_ltos,
-      COUNTIF(b.event_code = 'STOM')  AS trans_stom,
-      COUNTIF(b.event_code = 'MTOS')  AS trans_mtos,
-      -- Individual payment codes
-      COUNTIF(b.event_code = 'M1551') AS pay_m1551,
-      COUNTIF(b.event_code = 'M1552') AS pay_m1552,
-      COUNTIF(b.event_code = 'M1553') AS pay_m1553,
-      COUNTIF(b.event_code = 'M2551') AS pay_m2551,
-      COUNTIF(b.event_code = 'M2552') AS pay_m2552,
-      COUNTIF(b.event_code = 'M2553') AS pay_m2553,
-      COUNTIF(b.event_code = 'M3551') AS pay_m3551,
-      COUNTIF(b.event_code = 'M3552') AS pay_m3552,
-      COUNTIF(b.event_code = 'M3553') AS pay_m3553,
+      f.first_status AS first_maint_status,
+      ARRAY_AGG(CASE WHEN b.during_ownership THEN b.derived_status END
+        IGNORE NULLS ORDER BY b.event_date DESC LIMIT 1)[SAFE_OFFSET(0)] AS latest_maint_status,
+      COUNTIF(b.event_code = 'BIG.'  AND b.during_ownership) AS decl_big,
+      COUNTIF(b.event_code = 'SMAL'  AND b.during_ownership) AS decl_smal,
+      COUNTIF(b.event_code = 'MICR'  AND b.during_ownership) AS decl_micr,
+      COUNTIF(b.event_code = 'STOL'  AND b.during_ownership) AS trans_stol,
+      COUNTIF(b.event_code = 'LTOS'  AND b.during_ownership) AS trans_ltos,
+      COUNTIF(b.event_code = 'STOM'  AND b.during_ownership) AS trans_stom,
+      COUNTIF(b.event_code = 'MTOS'  AND b.during_ownership) AS trans_mtos,
+      COUNTIF(b.event_code = 'M1551' AND b.during_ownership) AS pay_m1551,
+      COUNTIF(b.event_code = 'M1552' AND b.during_ownership) AS pay_m1552,
+      COUNTIF(b.event_code = 'M1553' AND b.during_ownership) AS pay_m1553,
+      COUNTIF(b.event_code = 'M2551' AND b.during_ownership) AS pay_m2551,
+      COUNTIF(b.event_code = 'M2552' AND b.during_ownership) AS pay_m2552,
+      COUNTIF(b.event_code = 'M2553' AND b.during_ownership) AS pay_m2553,
+      COUNTIF(b.event_code = 'M3551' AND b.during_ownership) AS pay_m3551,
+      COUNTIF(b.event_code = 'M3552' AND b.during_ownership) AS pay_m3552,
+      COUNTIF(b.event_code = 'M3553' AND b.during_ownership) AS pay_m3553,
+      COUNTIF(b.event_code = 'M1559' AND b.during_ownership) AS pay_m1559,
       MIN(CASE
-        WHEN b.derived_status IS NOT NULL AND b.derived_status != f.first_status
+        WHEN b.during_ownership AND b.derived_status IS NOT NULL
+        AND b.derived_status != f.first_status
         THEN b.event_date
       END) AS change_date
     FROM base b
-    JOIN first_status f ON f.patent_number = b.patent_number
+    LEFT JOIN first_status f ON f.patent_number = b.patent_number
     GROUP BY b.patent_number, f.first_status
     """ if pat_nums else None
 
@@ -574,54 +1133,148 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
 
     # ── Query 3: Prosecution declarations (pfw_transactions) ───────
     # SMAL, BIG., MICR codes during prosecution phase.
-    pros_params = [
-        bigquery.ArrayQueryParameter("an_list", "STRING", app_nums),
-    ]
+    # Filtered by ownership window: only events during entity's ownership.
+    pros_params = list(params)  # include name params for ownership CTE
+    pros_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
     prosecution_sql = f"""
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    ),
+    owned_events AS (
+      SELECT
+        t.application_number,
+        t.event_code,
+        t.event_date,
+        CASE WHEN t.event_date >= COALESCE(aa.acquired_date, DATE '0001-01-01')
+              AND t.event_date <  COALESCE(dv.divested_date, DATE '9999-12-31')
+             THEN TRUE ELSE FALSE END AS during_ownership
+      FROM `{settings.pfw_transactions_table}` t
+      LEFT JOIN acquired_via_assign aa ON aa.application_number = t.application_number
+      LEFT JOIN divested dv ON dv.application_number = t.application_number
+      WHERE t.application_number IN UNNEST(@an_list)
+        AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
+    )
     SELECT
-      t.application_number,
-      ARRAY_AGG(t.event_code ORDER BY t.event_date ASC LIMIT 1)[OFFSET(0)]
+      application_number,
+      ARRAY_AGG(CASE WHEN during_ownership THEN event_code END
+        IGNORE NULLS ORDER BY event_date ASC LIMIT 1)[SAFE_OFFSET(0)]
         AS first_pros_status,
-      ARRAY_AGG(t.event_code ORDER BY t.event_date DESC LIMIT 1)[OFFSET(0)]
+      ARRAY_AGG(CASE WHEN during_ownership THEN event_code END
+        IGNORE NULLS ORDER BY event_date DESC LIMIT 1)[SAFE_OFFSET(0)]
         AS latest_pros_status,
-      COUNTIF(t.event_code = 'SMAL')  AS pros_smal,
-      COUNTIF(t.event_code = 'BIG.')  AS pros_big,
-      COUNTIF(t.event_code = 'MICR')  AS pros_micr,
-      -- 10-year filtered: latest status from events in the past 10 years
+      COUNTIF(event_code = 'SMAL' AND during_ownership) AS pros_smal,
+      COUNTIF(event_code = 'BIG.' AND during_ownership) AS pros_big,
+      COUNTIF(event_code = 'MICR' AND during_ownership) AS pros_micr,
       ARRAY_AGG(
-        CASE WHEN t.event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 YEAR)
-             THEN t.event_code END
-        IGNORE NULLS ORDER BY t.event_date DESC LIMIT 1
+        CASE WHEN during_ownership
+              AND event_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 10 YEAR)
+             THEN event_code END
+        IGNORE NULLS ORDER BY event_date DESC LIMIT 1
       )[SAFE_OFFSET(0)] AS latest_pros_status_10y
-    FROM `{settings.pfw_transactions_table}` t
-    WHERE t.application_number IN UNNEST(@an_list)
-      AND t.event_code IN ('SMAL', 'BIG.', 'MICR')
-    GROUP BY t.application_number
+    FROM owned_events
+    GROUP BY application_number
     """
     pros_by_app = {}
     pros_rows = bq_service.run_query(prosecution_sql, pros_params)
     for r in pros_rows:
         pros_by_app[r["application_number"]] = r
 
-    # ── Query 4: Sold count ────────────────────────────────────────
-    # Patents where the entity appears as assignOR (transferred away).
-    sold_params = list(params)  # reuse name params
-    sold_sql = f"""
-    SELECT COUNT(DISTINCT d.application_number) AS sold_count
-    FROM `{settings.assign_documents_table}` d
-    JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
-    WHERE d.application_number IN UNNEST(@an_list)
-      AND a.assignor_name IN ({name_in})
+    # ── Query 4: Ownership window per application ───────────────────
+    # Determines when the entity acquired and/or divested each patent.
+    # - acquired_date: non-NULL only for patents acquired via assignment
+    #   (not originally filed by the entity). NULL = applicant/inventor.
+    # - divested_date: non-NULL only for patents divested away via
+    #   divestiture, merger, or court_order.
+    ow_params = list(params)  # reuse name params
+    ow_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
+    ownership_sql = f"""
+    WITH applicant_inventor AS (
+      SELECT DISTINCT application_number
+      FROM (
+        SELECT application_number FROM `{settings.pfw_applicants_table}`
+        WHERE applicant_name IN ({name_in})
+        UNION DISTINCT
+        SELECT application_number FROM `{settings.pfw_inventors_table}`
+        WHERE inventor_name IN ({name_in})
+      )
+      WHERE application_number IN UNNEST(@an_list)
+    ),
+    acquired_via_assign AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS acquired_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignees_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignee_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order', 'name_change')
+        AND d.application_number NOT IN (SELECT application_number FROM applicant_inventor)
+      GROUP BY d.application_number
+    ),
+    divested AS (
+      SELECT d.application_number, MIN(r.recorded_date) AS divested_date
+      FROM `{settings.assign_documents_table}` d
+      JOIN `{settings.assign_assignors_table}` a ON a.reel_frame = d.reel_frame
+      JOIN `{settings.assign_records_table}` r ON r.reel_frame = d.reel_frame
+      WHERE d.application_number IN UNNEST(@an_list)
+        AND a.assignor_name IN ({name_in})
+        AND r.normalized_type IN ('divestiture', 'merger', 'court_order')
+      GROUP BY d.application_number
+    )
+    SELECT
+      aa.application_number, aa.acquired_date, CAST(NULL AS DATE) AS divested_date
+    FROM acquired_via_assign aa
+    WHERE aa.application_number NOT IN (SELECT application_number FROM divested)
+    UNION ALL
+    SELECT
+      dv.application_number, aa.acquired_date, dv.divested_date
+    FROM divested dv
+    LEFT JOIN acquired_via_assign aa ON aa.application_number = dv.application_number
     """
-    sold_params.append(bigquery.ArrayQueryParameter("an_list", "STRING", app_nums))
-    sold_rows = bq_service.run_query(sold_sql, sold_params)
-    sold_count = sold_rows[0]["sold_count"] if sold_rows else 0
+    ow_rows = bq_service.run_query(ownership_sql, ow_params)
+    # ownership_map: app_num → (acquired_date_or_None, divested_date_or_None)
+    ownership_map: Dict[str, tuple] = {}
+    for r in ow_rows:
+        ownership_map[r["application_number"]] = (
+            r.get("acquired_date"),
+            r.get("divested_date"),
+        )
+    divested_count = sum(1 for _, (_, dv) in ownership_map.items() if dv is not None)
+    acquired_count = sum(1 for _, (ac, _) in ownership_map.items() if ac is not None)
 
     # Event code → pg_by_patent field name (for building per-patent mf_events)
     _MF_CODE_MAP = [
         ('M1551', 'pay_m1551'), ('M1552', 'pay_m1552'), ('M1553', 'pay_m1553'),
         ('M2551', 'pay_m2551'), ('M2552', 'pay_m2552'), ('M2553', 'pay_m2553'),
-        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'),
+        ('M3551', 'pay_m3551'), ('M3552', 'pay_m3552'), ('M3553', 'pay_m3553'), ('M1559', 'pay_m1559'),
         ('BIG.', 'decl_big'), ('SMAL', 'decl_smal'), ('MICR', 'decl_micr'),
         ('STOL', 'trans_stol'), ('LTOS', 'trans_ltos'),
         ('STOM', 'trans_stom'), ('MTOS', 'trans_mtos'),
@@ -634,6 +1287,9 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     total_patents = 0
     total_applications = len(portfolio_rows)
     display_limit = min(req.limit, 50000)
+    # KPI split counters (granted vs pending)
+    filed_granted = 0; acquired_granted = 0; divested_granted = 0; expired_granted = 0
+    filed_pending = 0; acquired_pending = 0; divested_pending = 0
     # Dashboard accumulators — prosecution
     pros_small = 0
     pros_large = 0
@@ -658,7 +1314,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
     # Individual payment code accumulators
     pg_m1551 = 0; pg_m1552 = 0; pg_m1553 = 0
     pg_m2551 = 0; pg_m2552 = 0; pg_m2553 = 0
-    pg_m3551 = 0; pg_m3552 = 0; pg_m3553 = 0
+    pg_m3551 = 0; pg_m3552 = 0; pg_m3553 = 0; pg_m1559 = 0
     # Declaration accumulators
     pg_decl_smal = 0; pg_decl_big = 0; pg_decl_micr = 0
 
@@ -726,6 +1382,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         pg_m3551 += pg.get("pay_m3551", 0)
         pg_m3552 += pg.get("pay_m3552", 0)
         pg_m3553 += pg.get("pay_m3553", 0)
+        pg_m1559 += pg.get("pay_m1559", 0)
         # Declaration codes
         pg_decl_smal += pg.get("decl_smal", 0)
         pg_decl_big += pg.get("decl_big", 0)
@@ -747,6 +1404,49 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
         mf_codes = [code for code, field in _MF_CODE_MAP if pg.get(field, 0) > 0]
         mf_events = ' '.join(mf_codes)
 
+        # Ownership window info for this patent
+        ow = ownership_map.get(app_num, (None, None))
+        acq_date, div_date = ow
+
+        # Determine expired status for granted patents
+        # A patent expires if maintenance fees were missed or term ended (20 yrs)
+        expired = False
+        grant_dt = r.get("grant_date")
+        if pat_num and grant_dt and isinstance(grant_dt, _date):
+            age_days = (_date.today() - grant_dt).days
+            mf_set = set(mf_codes)
+            has_551 = any(c.endswith("551") for c in mf_set)
+            has_552 = any(c.endswith("552") for c in mf_set)
+            has_553 = any(c.endswith("553") for c in mf_set)
+            if age_days >= 7305:         # 20 years — natural expiration
+                expired = True
+            elif age_days >= 4383 and not has_553:  # 12 years, no 11.5-yr fee
+                expired = True
+            elif age_days >= 2922 and not has_552:  # 8 years, no 7.5-yr fee
+                expired = True
+            elif age_days >= 1461 and not has_551:  # 4 years, no 3.5-yr fee
+                expired = True
+
+        # KPI split counts
+        is_acquired = acq_date is not None
+        is_divested = div_date is not None
+        if pat_num:
+            if is_acquired:
+                acquired_granted += 1
+            else:
+                filed_granted += 1
+            if is_divested:
+                divested_granted += 1
+            elif expired:
+                expired_granted += 1
+        else:
+            if is_acquired:
+                acquired_pending += 1
+            else:
+                filed_pending += 1
+            if is_divested:
+                divested_pending += 1
+
         # Only add to detailed results up to display_limit
         if len(results) < display_limit:
             results.append({
@@ -763,14 +1463,40 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
                 "change_date": _fmt_date(pg_change),
                 "change_phase": change_phase,
                 "mf_events": mf_events,
+                "acquired_via_assignment": is_acquired,
+                "acquired_date": _fmt_date(acq_date),
+                "divested": is_divested,
+                "divested_date": _fmt_date(div_date),
+                "expired": expired,
             })
+
+    # Computed KPIs
+    owned_granted = filed_granted + acquired_granted - divested_granted - expired_granted
+    owned_pending = filed_pending + acquired_pending - divested_pending
 
     return {
         "applicant_name": req.applicant_name,
         "expanded_names": expanded,
         "total_patents": total_patents,
         "total_applications": total_applications,
-        "sold_count": sold_count,
+        "divested_count": divested_count,
+        "acquired_count": acquired_count,
+        "sold_count": divested_count,  # backward compatibility alias
+        "portfolio": {
+            "granted": {
+                "filed": filed_granted,
+                "acquired": acquired_granted,
+                "divested": divested_granted,
+                "expired": expired_granted,
+                "owned": owned_granted,
+            },
+            "pending": {
+                "filed": filed_pending,
+                "acquired": acquired_pending,
+                "divested": divested_pending,
+                "owned": owned_pending,
+            },
+        },
         "prosecution": {
             "small": pros_small,
             "large": pros_large,
@@ -795,7 +1521,7 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "payments": {
                 "m1551": pg_m1551, "m1552": pg_m1552, "m1553": pg_m1553,
                 "m2551": pg_m2551, "m2552": pg_m2552, "m2553": pg_m2553,
-                "m3551": pg_m3551, "m3552": pg_m3552, "m3553": pg_m3553,
+                "m3551": pg_m3551, "m3552": pg_m3552, "m3553": pg_m3553, "m1559": pg_m1559,
             },
             "decl_smal": pg_decl_smal,
             "decl_big": pg_decl_big,

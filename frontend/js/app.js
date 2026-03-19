@@ -557,6 +557,7 @@ async function showChainPopup(patentNum, anchorEl) {
       `<tr>
         <td class="chain-td-date">${escHtml(a.execution_date || '\u2014')}</td>
         <td>${multiLine(a.assignor)}</td>
+        <td>${escHtml(a.normalized_type || '\u2014')}</td>
         <td>${escHtml(a.conveyance)}</td>
         <td>${multiLine(a.assignee)}</td>
       </tr>`
@@ -570,7 +571,7 @@ async function showChainPopup(patentNum, anchorEl) {
       <div class="chain-table-wrap">
         <table class="chain-table">
           <thead><tr>
-            <th>Date</th><th>Assignor</th><th>Type</th><th>Assignee</th>
+            <th>Date</th><th>Assignor</th><th>Type</th><th>Conveyance Text</th><th>Assignee</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>

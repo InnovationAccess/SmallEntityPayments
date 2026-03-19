@@ -1,7 +1,7 @@
 # SmallEntityPayments — Project Instructions
 
 ## Quick Start
-- Read HANDOFF315.md for full project context, architecture, and current state
+- Read HANDOFF316.md for full project context, architecture, and current state
 - This project lives at: https://github.com/InnovationAccess/SmallEntityPayments
 - GCP Project: uspto-data-app
 - BigQuery Dataset: uspto_data (location: us-west1)
@@ -11,7 +11,7 @@
 - NEVER source data from anywhere the user hasn't explicitly specified
 - Data integrity is the top priority — no shortcuts, no third-party datasets
 - Only official USPTO bulk data products are authorized data sources
-- The `name_unification` table is user-curated — NEVER drop, truncate, or bulk-modify it (row count grows over time as user adds MDM mappings; currently ~545 rows across 6 entities)
+- The `name_unification` table is user-curated — NEVER drop, truncate, or bulk-modify it (row count grows over time as user adds MDM mappings; currently ~571 rows)
 - The `etl/load_file_wrapper.py` script is DEPRECATED and deleted — do not recreate it
 - NEVER search a string across multiple fields simultaneously (e.g., `WHERE app_num = @id OR patent_num = @id`) — this causes collisions between patent numbers and application serial numbers. Always resolve to application_number first via patent_file_wrapper_v2.
 - Entity status must be DERIVED from maintenance fee event codes (M1xxx/F17xx=LARGE, M2xxx/F27xx=SMALL, M3xxx=MICRO), never from the entity_status column (which USPTO populates inconsistently)
@@ -42,6 +42,19 @@
 - `KeyError(0)` prints as just "0" — extremely hard to debug. This happens when `dict[0]` is called (treating dict as list). Always use `_as_list()` to prevent this
 - The USPTO API returns HTTP 429 (rate limited) — retry with backoff, don't assume the download URL is broken
 
+## Fee Calculation Rules (learned from expert consultation)
+- UAIA effective date is Dec 29, 2022 (NOT Jan 1, 2023) — Small 50%→60%, Micro 75%→80%
+- ABNF is PROC (procedural), NOT PAY — expert corrected their initial classification
+- Pre-2013: no RCE tier distinction — use flat rate for all RCEs regardless of ordinal
+- Pre-2013: micro entity did not exist — micro rates = small rates
+- Appeal brief fee ($0 post-2012) — AP.B was a paid code before 2013 ($500), eliminated after
+- P005 is a compound fee — issue fee + petition for revival (NOT just the issue fee)
+- P007 is a $420 processing fee proxy (NOT the $2,200 petition for revival rate)
+- FEE. must be deduped — only count if no other PAY code within ±3 days for same application
+- IDS fee is conditional — only PAY if preceded by CTFR, MS95, NOA, MAILNOA, or D.ISS
+- Same-category dedup: same fee category + same app + same date = 1 payment
+- Only ~22 of 102 prosecution event codes trigger actual payments; the rest are procedural or reversals
+
 ## Architecture
 - Backend: Python 3.11 / FastAPI on Google Cloud Run (us-central1)
 - Frontend: Vanilla JS SPA served from same Cloud Run container (no build step)
@@ -49,36 +62,23 @@
 - AI: Vertex AI Gemini for natural language queries + PDF vision extraction
 - Storage: Google Cloud Storage (gs://uspto-bulk-staging/) for bulk data staging + prosecution invoices
 - ETL: Cloud Run Jobs triggered by Cloud Scheduler, using gsutil/bq CLI tools
+- Litigation: Unified Patents public Elasticsearch API, cached in BigQuery 30 days
 - All BigQuery tables use flat/denormalized schemas (no STRUCT/ARRAY except cpc_codes)
 - Cross-table joins use application_number as the universal key (not patent_number)
 
-## Current State (2026-03-17)
-- All tables loaded: ~1.0 billion rows across 24 tables
+## Current State (2026-03-18)
+- All tables loaded: ~1.9 billion rows across 27 tables (~155 GB)
 - Patent assignments normalized into 4 tables (v4): pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents — linked by reel_frame, cross-table joins via application_number
-- Old patent_assignments_v2 and patent_assignments_v3 tables dropped
-- **Conveyance normalization complete**: All 9.07M assignment records classified into 14 fine-grained `normalized_type` categories (see Normalized Assignment Types below). The `employer_assignment` boolean is fully populated. 15,806 uncertain records flagged as `review` for human review.
-- **normalized_type is NOT yet exposed in the frontend** — no UI shows it yet
-- PASDL daily pipeline automatically normalizes new records: parser outputs `assignment_pending`, then `resolve_assignment_pending()` runs corporate filter + inventor matching post-load
-- 4 automated update pipelines running on Cloud Scheduler (PASDL uses v4 parser with normalized_type output)
-- 8 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status (+ Applicant Portfolio), Prosecution Fees, Update Log, SEC Leads
-- 11 pfw_* tables: pfw_applicants (7.47M rows), pfw_inventors (35.7M rows), pfw_transactions, pfw_child_continuity, pfw_foreign_priority, pfw_publications, pfw_patent_term_adjustment, pfw_pta_history, pfw_correspondence_address, pfw_attorneys, pfw_document_metadata, pfw_embedded_assignments
-- **pfw_applicants and pfw_inventors are FULLY LOADED back to mid-1990s** (not just 2021+)
-- entity_names: 7.68M rows
-- All tables have sticky headers, sortable columns, column pickers, and assignment chain popup on patent numbers
-- Assignment popup: movable (drag header), resizable (drag corner), fills right side of viewport, names show one per line
-- Citation tab includes examiner/applicant breakdown lists with name normalization
-- Entity Status tab: micro chart timelines per patent, batched API calls (200/batch), single patent timeline view
-- Prosecution Fees tab has 3-phase workflow: entity discovery, application drill-down, invoice extraction via Gemini Vision
-- ETL pipeline logging writes to `etl_log` BigQuery table
-
-## Known Architecture Issue (open — next to fix)
-The `get_applicant_portfolio()` in `api/routers/entity_status.py` finds patents via 4 UNION DISTINCT sources:
-1. `pfw_applicants` — all applicants
-2. `pfw_inventors` — all inventors
-3. `pat_assign_assignees` — received as assignee
-4. `patent_file_wrapper_v2.first_applicant_name` — **REDUNDANT** (pfw_applicants now covers same data back to mid-1990s)
-
-**Critical**: The query finds all patents ever TOUCHED by the entity, not just currently OWNED. Patents sold/divested are still counted in KPIs. Fix: use `normalized_type` (divestiture/merger) to exclude patents where entity later appears as assignOR in an ownership-transfer record.
+- **Conveyance normalization complete**: All 9.07M assignment records classified into 14 fine-grained `normalized_type` categories. `employer_assignment` boolean fully populated. 15,806 uncertain records flagged as `review`.
+- **Prosecution fee calculation engine deployed**: `utils/fee_schedule.py` computes exact dollar amounts for prosecution payments using 12 fee categories × 7 fee schedule periods × 3 entity sizes. Expert-verified forensic rules.
+- **Dollar Impact KPIs live in frontend**: Amount Paid, Large Rate, Underpayment — both all-time and 10-year
+- Prosecution payment analysis cached in BigQuery (`prosecution_payment_cache` with `cache_version=2`)
+- PASDL daily pipeline automatically normalizes new records via `resolve_assignment_pending()` post-load
+- 4 automated update pipelines running on Cloud Scheduler
+- 9 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status, Prosecution Fees, Update Log, SEC Leads
+- Entity Status tab: ownership window filtering, micro chart timelines, prosecution payment analysis with dollar amounts, patent litigation integration
+- Assignment popup shows normalized_type ("Type" column), movable + resizable
+- Patent litigation integration via Unified Patents API, cached 30 days
 
 ## Normalized Assignment Types
 The `pat_assign_records.normalized_type` column classifies each assignment into one of 14 categories:
@@ -109,6 +109,7 @@ The `pat_assign_records.normalized_type` column classifies each assignment into 
 
 **Related files:**
 - `utils/conveyance_classifier.py` — `classify_conveyance_normalized()` for parser-time classification
+- `utils/fee_schedule.py` — `calculate_payment_fees()` for prosecution fee dollar calculation
 - `etl/normalize_conveyance.py` — One-time migration script (already run)
 - `etl/update_pipeline.py` — `resolve_assignment_pending()` for daily pipeline post-load normalization
 
@@ -120,19 +121,21 @@ The `pat_assign_records.normalized_type` column classifies each assignment into 
 - Storage: Google Cloud Storage for bulk data staging
 - ETL: Cloud Run Jobs + Cloud Scheduler for automated updates
 
-## API Routers (8 total)
+## API Routers (10 total)
 - `/mdm/*` — MDM name normalization (api/routers/mdm.py)
 - `/query/*` — Boolean query builder (api/routers/query.py)
 - `/ai/*` — AI assistant (api/routers/ai_assistant.py)
 - `/api/forward-citations/*` — Citation lookup with name resolution (api/routers/citations.py)
 - `/api/assignments/*` — Assignment chain lookup (api/routers/assignments.py)
-- `/api/entity-status/*` — Entity status analytics (api/routers/entity_status.py)
+- `/api/entity-status/*` — Entity status analytics + prosecution fee calculation (api/routers/entity_status.py)
 - `/api/prosecution/*` — Prosecution fee investigation (api/routers/prosecution.py)
+- `/api/litigation/*` — Patent litigation lookup (api/routers/litigation.py)
 - `/api/etl-log/*` — Pipeline monitoring (api/routers/etl_log.py)
+- `/api/sec-leads/*` — SEC EDGAR lead enrichment (api/routers/sec_leads.py)
 
 ## Frontend Cache-Busting Versions
-- styles.css?v=23, app.js?v=16, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8
-- citations.js?v=5, entity_status.js?v=19, prosecution.js?v=9, etl_log.js?v=3
+- styles.css?v=25, app.js?v=17, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8
+- citations.js?v=5, entity_status.js?v=29, prosecution.js?v=9, etl_log.js?v=3, sec_leads.js?v=3
 - ALWAYS bump the ?v= number when changing any JS or CSS file — browsers aggressively cache these
 
 ## ETL Pipeline

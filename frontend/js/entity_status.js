@@ -43,14 +43,126 @@ const statusMsg       = document.getElementById('es-status');
 const STATUS_COLORS = { large: '#ef4444', small: '#22c55e', micro: '#3b82f6' };
 const GRAY = '#6b7280';
 
+// Prosecution payment event code descriptions (for tooltips)
+const PROS_PAY_DESCRIPTIONS = {
+  'A.I.': 'Processing fee (1.17(i)(1))',
+  'A.LA': 'Processing fee (1.17(i)(1))',
+  'A.NQ': 'Processing fee (1.17(i)(1))',
+  'A.NR': 'Processing fee (1.17(i)(1))',
+  'A.PE': 'Processing fee (1.17(i)(1))',
+  'A371': 'Basic filing fee - Utility (1.16(a))',
+  'AABR': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'ABN/': 'Basic filing fee - Utility (1.16(a))',
+  'ABN6': 'Basic filing fee - Utility (1.16(a))',
+  'ABN9': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'ABNF': 'Basic filing fee - Utility (1.16(a))',
+  'ACKNAHA': 'Processing fee (1.17(i)(1))',
+  'ADDDWRG': 'Processing fee (1.17(i)(1))',
+  'ADDFLFEE': 'Basic filing fee - Utility (1.16(a))',
+  'ADDSPEC': 'Processing fee (1.17(i)(1))',
+  'AFNE': 'Processing fee (1.17(i)(1))',
+  'AP.B': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'AP.C': 'Notice of appeal (1.17(b)(1))',
+  'AP.C3': 'Notice of appeal (1.17(b)(1))',
+  'AP/A': 'Notice of appeal (1.17(b)(1))',
+  'APBD': 'Notice of appeal (1.17(b)(1))',
+  'APBI': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'APBR': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'APCA': 'Notice of appeal (1.17(b)(1))',
+  'APCD': 'Notice of appeal (1.17(b)(1))',
+  'APCP': 'Notice of appeal (1.17(b)(1))',
+  'APCR': 'Notice of appeal (1.17(b)(1))',
+  'APE2': 'Notice of appeal (1.17(b)(1))',
+  'APEA': 'Notice of appeal (1.17(b)(1))',
+  'APFC': 'Notice of appeal (1.17(b)(1))',
+  'APHT': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'APND': 'Notice of appeal (1.17(b)(1))',
+  'APNH': 'Notice of appeal (1.17(b)(1))',
+  'APNH.CA': 'Notice of appeal (1.17(b)(1))',
+  'APNH.CO': 'Notice of appeal (1.17(b)(1))',
+  'APNH.MI': 'Notice of appeal (1.17(b)(1))',
+  'APNH.TX': 'Notice of appeal (1.17(b)(1))',
+  'APNH.VA': 'Notice of appeal (1.17(b)(1))',
+  'APOH': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'APRD': 'Notice of appeal (1.17(b)(1))',
+  'APRR': 'Notice of appeal (1.17(b)(1))',
+  'ARBP': 'Processing fee (1.17(i)(1))',
+  'BRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'C610': 'Processing fee (1.17(i)(1))',
+  'C9DE': 'Processing fee (1.17(i)(1))',
+  'C9GR': 'Basic filing fee - Utility (1.16(a))',
+  'CPA-AMD': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'DIST': 'Terminal disclaimer (1.20(d))',
+  'FEE.': 'Processing fee (1.17(i)(1))',
+  'FLFEE': 'Basic filing fee - Utility (1.16(a))',
+  'FRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'IDS.': 'Submission of Information Disclosure Statement (1.17(p))',
+  'IDSPTA': 'Submission of Information Disclosure Statement (1.17(p))',
+  'IFEE': 'Utility issue fee (1.18(a))',
+  'IFEEHA': 'Utility issue fee (1.18(a))',
+  'IRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'J521': 'Processing fee (1.17(i)(1))',
+  'JA94': 'Extension for response within first month (1.17(a)(1))',
+  'JA95': 'Extension for response within first month (1.17(a)(1))',
+  'JS13': 'Processing fee (1.17(i)(1))',
+  'MABN6': 'Basic filing fee - Utility (1.16(a))',
+  'MAPHT': 'Request for an oral hearing before the PTAB (1.17(d))',
+  'MCPA-AMD': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'MODPD28': 'Utility issue fee (1.18(a))',
+  'MODPD33': 'Processing fee (1.17(i)(1))',
+  'MP005': 'Utility issue fee (1.18(a))',
+  'MP020': 'Extension for response within first month (1.17(a)(1))',
+  'MQRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'MRAPD': 'Notice of appeal (1.17(b)(1))',
+  'MRAPS': 'Processing fee (1.17(i)(1))',
+  'MRXEAS': 'Processing fee (1.17(i)(1))',
+  'MRXG.': 'Extension for response within first month (1.17(a)(1))',
+  'MRXTG': 'Extension for response within first month (1.17(a)(1))',
+  'MSML': 'Processing fee (1.17(i)(1))',
+  'N/AP': 'Notice of appeal (1.17(b)(1))',
+  'N/AP-NOA': 'Notice of appeal (1.17(b)(1))',
+  'N084': 'Utility issue fee (1.18(a))',
+  'NOIFIBHA': 'Processing fee (1.17(i)(1))',
+  'ODPD28': 'Utility issue fee (1.18(a))',
+  'ODPD33': 'Processing fee (1.17(i)(1))',
+  'ODPET4': 'Petition for revival of abandoned application (1.17(m))',
+  'P003': 'Processing fee (1.17(i)(1))',
+  'P005': 'Utility issue fee (1.18(a)) + Petition for revival (1.17(m))',
+  'P007': 'Processing fee (1.17(i)(1)) — proxy',
+  'P010': 'Processing fee (1.17(i)(1))',
+  'P012': 'Processing fee (1.17(i)(1))',
+  'P020': 'Extension for response within first month (1.17(a)(1))',
+  'P131': 'Processing fee (1.17(i)(1))',
+  'P138': 'Extension for response within first month (1.17(a)(1))',
+  'PFP': 'Processing fee (1.17(i)(1))',
+  'PMFP': 'Processing fee (1.17(i)(1))',
+  'QRCE': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'RCEX': 'Request for continued examination (RCE) - 1st request (1.17(e)(1))',
+  'RETF': 'Processing fee (1.17(i)(1))',
+  'RVIFEEHA': 'Utility issue fee (1.18(a)) — reversal',
+  'RXIDS.R': 'Submission of Information Disclosure Statement (1.17(p))',
+  'RXRQ/T': 'Extension for response within first month (1.17(a)(1))',
+  'RXSAPB': 'Filing a brief in support of an appeal (1.17(b)(2))',
+  'RXXT/G': 'Extension for response within first month (1.17(a)(1))',
+  'TDP': 'Terminal disclaimer (1.20(d))',
+  'VFEE': 'Utility issue fee (1.18(a)) — reversal',
+  'XT/G': 'Extension for response within first month (1.17(a)(1))',
+};
+
+// Prosecution status-change codes (beyond the 3 basic ones)
+const _PROS_TO_SMALL = new Set(['SES','SMAL','P013','MP013','MSML','NOSE','MRNSME']);
+const _PROS_TO_MICRO = new Set(['MICR','MENC','PMRIA','MPMRIA']);
+const _PROS_TO_LARGE = new Set(['BIG.','P014','MP014']);
+
 function classifyEvent(code) {
   if (!code) return 'other';
   if (code.startsWith('M1') || code.startsWith('F17')) return 'large_payment';
   if (code.startsWith('M2') || code.startsWith('F27')) return 'small_payment';
   if (code.startsWith('M3')) return 'micro_payment';
-  if (code === 'BIG.') return 'decl_big';
-  if (code === 'SMAL') return 'decl_smal';
-  if (code === 'MICR') return 'decl_micr';
+  // Prosecution status transitions (extended set)
+  if (_PROS_TO_LARGE.has(code)) return 'decl_big';
+  if (_PROS_TO_SMALL.has(code)) return 'decl_smal';
+  if (_PROS_TO_MICRO.has(code)) return 'decl_micr';
   if (code === 'STOL') return 'trans_to_large';
   if (code === 'LTOS' || code === 'MTOS') return 'trans_to_small';
   if (code === 'STOM') return 'trans_to_micro';
@@ -58,6 +170,8 @@ function classifyEvent(code) {
   if (code === 'GRNT') return 'grant';
   if (code.startsWith('REM')) return 'reminder';
   if (code === 'ASPN') return 'attorney';
+  if (code === 'LITG') return 'litigation';
+  if (code === 'PROS_PAY') return 'pros_payment';
   return 'other';
 }
 
@@ -124,6 +238,18 @@ function svgBriefcase() {
     + '<rect x="1" y="5" width="12" height="8" rx="1.5"/>'
     + '<path d="M5,5 L5,3.5 A1.5,1.5 0 0 1 9,3.5 L9,5" fill="none" stroke="currentColor" stroke-width="1.5"/>'
     + '<line x1="1" y1="9" x2="13" y2="9" stroke="white" stroke-width="1"/>'
+    + '</svg>';
+}
+
+function svgStar() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<polygon points="7,1 8.8,5.3 13.4,5.8 10,9 11,13.5 7,11.2 3,13.5 4,9 0.6,5.8 5.2,5.3"/>'
+    + '</svg>';
+}
+
+function svgDollar() {
+  return '<svg viewBox="0 0 14 14" width="100%" height="100%" fill="currentColor">'
+    + '<text x="7" y="12" text-anchor="middle" font-size="12" font-weight="bold" font-family="Arial,sans-serif">$</text>'
     + '</svg>';
 }
 
@@ -265,6 +391,9 @@ function renderPatentTimeline(data) {
         marker.style.left = pct + '%';
         marker.style.backgroundColor = '#92400e';
         marker.title = `${ev.c} \u2014 ${ev.d}`;
+      } else if (cat === 'litigation') {
+        marker = createIconEl(svgStar, '#d4a017', pct, ev);
+        marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
       } else if (cat.startsWith('trans_to_')) {
         marker = document.createElement('div');
         marker.className = 'es-microchart-dot-trans';
@@ -501,6 +630,10 @@ function renderApplicantPortfolio(data) {
   const pros = data.prosecution || {};
   const pg = data.post_grant || {};
   const pay = pg.payments || {m1551:0,m1552:0,m1553:0,m2551:0,m2552:0,m2553:0,m3551:0,m3552:0,m3553:0};
+  const pf = data.portfolio || {
+    granted: {filed:0, acquired:0, divested:0, expired:0, owned:0},
+    pending: {filed:0, acquired:0, divested:0, owned:0},
+  };
 
   // Row & column totals for payment table
   const row35 = pay.m3551 + pay.m2551 + pay.m1551;
@@ -524,25 +657,174 @@ function renderApplicantPortfolio(data) {
         ? `<p class="text-muted">Including ${data.expanded_names.length} name variants (applicants, inventors, and assignees)</p>`
         : ''}
 
-      <!-- Top-level summary -->
+      <!-- Granted Patents KPIs -->
+      <h4 style="margin:0.25rem 0 0.5rem;font-size:0.95rem;color:#374151">Granted Patents</h4>
       <div class="cite-summary-grid">
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.total_patents.toLocaleString()}</span>
-          <span class="cite-stat-label">Granted Patents</span>
+          <span class="cite-stat-value">${kpi(pf.granted.filed, 'portfolio:filed_granted', 'Filed Patents')}</span>
+          <span class="cite-stat-label">Filed</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${(data.total_applications - data.total_patents).toLocaleString()}</span>
-          <span class="cite-stat-label">Pending Applications</span>
+          <span class="cite-stat-value">${kpi(pf.granted.acquired, 'portfolio:acquired_granted', 'Acquired Patents')}</span>
+          <span class="cite-stat-label">Acquired</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.sold_count.toLocaleString()}</span>
-          <span class="cite-stat-label">Assigned Away</span>
+          <span class="cite-stat-value">${kpi(pf.granted.divested, 'portfolio:divested_granted', 'Divested Patents')}</span>
+          <span class="cite-stat-label">Divested</span>
         </div>
         <div class="cite-stat">
-          <span class="cite-stat-value">${data.total_applications.toLocaleString()}</span>
-          <span class="cite-stat-label">Total Applications</span>
+          <span class="cite-stat-value">${kpi(pf.granted.expired, 'portfolio:expired_granted', 'Expired Patents')}</span>
+          <span class="cite-stat-label">Expired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value" style="font-weight:700">${pf.granted.owned.toLocaleString()}</span>
+          <span class="cite-stat-label" style="font-weight:600">Owned</span>
         </div>
       </div>
+
+      <!-- Pending Applications KPIs -->
+      <h4 style="margin:1rem 0 0.5rem;font-size:0.95rem;color:#374151">Pending Applications</h4>
+      <div class="cite-summary-grid">
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.filed, 'portfolio:filed_pending', 'Filed Applications')}</span>
+          <span class="cite-stat-label">Filed</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.acquired, 'portfolio:acquired_pending', 'Acquired Applications')}</span>
+          <span class="cite-stat-label">Acquired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">${kpi(pf.pending.divested, 'portfolio:divested_pending', 'Divested Applications')}</span>
+          <span class="cite-stat-label">Divested</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value">\u2014</span>
+          <span class="cite-stat-label">Expired</span>
+        </div>
+        <div class="cite-stat">
+          <span class="cite-stat-value" style="font-weight:700">${pf.pending.owned.toLocaleString()}</span>
+          <span class="cite-stat-label" style="font-weight:600">Owned</span>
+        </div>
+      </div>
+      <p class="text-muted" style="margin:0.5rem 0 0;font-size:0.8rem">Owned = Filed + Acquired \u2212 Divested \u2212 Expired &nbsp;|&nbsp; KPIs reflect only events during the entity's ownership period</p>
+
+      <!-- Litigation KPI (populated asynchronously) -->
+      <div id="es-litigation-kpis" style="display:none;margin-top:1rem">
+        <h4 class="card-title" style="font-size:1rem">Litigation History</h4>
+        <div class="cite-summary-grid">
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-litigated-count">\u2026</span>
+            <span class="cite-stat-label">Litigated Patents</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-total-cases">\u2026</span>
+            <span class="cite-stat-label">Total Cases</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-active-cases">\u2026</span>
+            <span class="cite-stat-label">Active</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-resolved-cases">\u2026</span>
+            <span class="cite-stat-label">Resolved</span>
+          </div>
+          <div class="cite-stat">
+            <span class="cite-stat-value" id="es-courts-count">\u2026</span>
+            <span class="cite-stat-label">Courts</span>
+          </div>
+        </div>
+        <p class="text-muted" id="es-litigation-status" style="margin:0.25rem 0 0;font-size:0.8rem">Checking litigation history\u2026</p>
+      </div>
+      <div id="es-litigation-table-wrap" style="display:none;margin-top:1rem"></div>
+    </div>
+
+    <!-- Prosecution Payment Analysis -->
+    <div id="es-pros-payments" style="margin-top:1rem">
+      <div class="card">
+        <h4 class="card-title" style="font-size:1rem">Prosecution Payment Analysis</h4>
+        <p class="text-muted" style="margin:0 0 0.5rem">Identifies all fee payments made during prosecution and classifies them by the entity status at the time of payment</p>
+        <button class="btn btn-primary" id="es-pros-pay-btn" style="margin-bottom:0.5rem">Analyze Prosecution Payments</button>
+        <div id="es-pros-pay-kpis" style="display:none">
+          <div class="cite-summary-grid">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution: Small Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-small">0</span>
+              <span class="cite-stat-label">${statusBadge('SMALL')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution: Micro Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-micro">0</span>
+              <span class="cite-stat-label">${statusBadge('MICRO')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution: Large Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-large">0</span>
+              <span class="cite-stat-label">${statusBadge('LARGE')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution: All Payments">
+              <span class="cite-stat-value" id="es-pros-pay-total">0</span>
+              <span class="cite-stat-label">Total</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-apps">0</span>
+              <span class="cite-stat-label">Apps w/ Findings</span>
+            </div>
+          </div>
+          <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution 10y: Small Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-small-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('SMALL')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution 10y: Micro Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-micro-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('MICRO')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution 10y: Large Rate Payments">
+              <span class="cite-stat-value" id="es-pros-pay-large-10y">0</span>
+              <span class="cite-stat-label">${statusBadge('LARGE')} Rate</span>
+            </div>
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution 10y: All Payments">
+              <span class="cite-stat-value" id="es-pros-pay-total-10y">0</span>
+              <span class="cite-stat-label">Total</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-apps-10y">0</span>
+              <span class="cite-stat-label">Apps w/ Findings</span>
+            </div>
+          </div>
+          <p class="text-muted" style="margin:0.75rem 0 0.25rem;font-size:0.8rem;font-weight:600">Dollar Impact — Reduced-Rate Payments (Small + Micro)</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-paid">$0</span>
+              <span class="cite-stat-label">Amount Paid</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-large">$0</span>
+              <span class="cite-stat-label">Large Rate</span>
+            </div>
+            <div class="cite-stat" style="background:#fef2f2">
+              <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta">$0</span>
+              <span class="cite-stat-label">Underpayment</span>
+            </div>
+          </div>
+          <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
+          <div class="cite-summary-grid">
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-paid-10y">$0</span>
+              <span class="cite-stat-label">Amount Paid</span>
+            </div>
+            <div class="cite-stat">
+              <span class="cite-stat-value" id="es-pros-pay-dollars-large-10y">$0</span>
+              <span class="cite-stat-label">Large Rate</span>
+            </div>
+            <div class="cite-stat" style="background:#fef2f2">
+              <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta-10y">$0</span>
+              <span class="cite-stat-label">Underpayment</span>
+            </div>
+          </div>
+        </div>
+        <p class="text-muted" id="es-pros-pay-status" style="margin:0.25rem 0 0;font-size:0.8rem"></p>
+      </div>
+      <div id="es-pros-summary-wrap" style="display:none;margin-top:1rem"></div>
+      <div id="es-pros-detail-wrap" style="display:none;margin-top:1rem"></div>
     </div>
 
     <!-- Prosecution Phase -->
@@ -603,6 +885,7 @@ function renderApplicantPortfolio(data) {
               <th style="text-align:center">${statusBadge('SMALL')}</th>
               <th style="text-align:center">${statusBadge('LARGE')}</th>
               <th style="text-align:center"><strong>Total</strong></th>
+              <th style="text-align:center;font-size:0.75rem;line-height:1.1" title="37 CFR 1.28(c) — good-faith error corrections (M1559)">37 CFR<br>1.28(c)</th>
             </tr></thead>
             <tbody>
               <tr>
@@ -611,6 +894,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2551, 'mf:M2551', 'Small 3.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1551, 'mf:M1551', 'Large 3.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row35, 'mf:M3551,M2551,M1551', '3.5-yr Total')}</td>
+                <td></td>
               </tr>
               <tr>
                 <td style="font-weight:600">7.5-yr</td>
@@ -618,6 +902,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2552, 'mf:M2552', 'Small 7.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1552, 'mf:M1552', 'Large 7.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row75, 'mf:M3552,M2552,M1552', '7.5-yr Total')}</td>
+                <td></td>
               </tr>
               <tr>
                 <td style="font-weight:600">11.5-yr</td>
@@ -625,6 +910,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right">${kpi(pay.m2553, 'mf:M2553', 'Small 11.5-yr')}</td>
                 <td style="text-align:right">${kpi(pay.m1553, 'mf:M1553', 'Large 11.5-yr')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(row115, 'mf:M3553,M2553,M1553', '11.5-yr Total')}</td>
+                <td></td>
               </tr>
             </tbody>
             <tfoot>
@@ -634,6 +920,7 @@ function renderApplicantPortfolio(data) {
                 <td style="text-align:right;font-weight:600">${kpi(colSmall, 'mf:M2551,M2552,M2553', 'Small Total')}</td>
                 <td style="text-align:right;font-weight:600">${kpi(colLarge, 'mf:M1551,M1552,M1553', 'Large Total')}</td>
                 <td style="text-align:right;font-weight:700">${kpi(grandTotal, 'mf:M3551,M3552,M3553,M2551,M2552,M2553,M1551,M1552,M1553', 'All Payments')}</td>
+                <td style="text-align:right;font-weight:600">${kpi(pay.m1559 || 0, 'mf:M1559', '37 CFR 1.28(c)')}</td>
               </tr>
             </tfoot>
           </table>
@@ -680,11 +967,12 @@ function renderApplicantPortfolio(data) {
           <th data-sort-key="0">Patent #</th>
           <th data-sort-key="1">App #</th>
           <th data-sort-key="2">Grant Date</th>
-          <th>Events</th>
+          <th class="es-events-hdr">Events</th>
           <th data-sort-key="4">Prosecution</th>
           <th data-sort-key="5">Post-Grant First</th>
           <th data-sort-key="6">Post-Grant Current</th>
           <th data-sort-key="7">Changed?</th>
+          <th data-sort-key="8">Ownership</th>
         </tr></thead>
         <tbody>
   `;
@@ -693,7 +981,17 @@ function renderApplicantPortfolio(data) {
     const changedMark = r.status_changed
       ? `<span class="es-badge es-badge--changed">${r.change_phase === 'prosecution' ? 'Pros' : 'PG'}</span>`
       : '';
-    html += `<tr data-pn="${escHtml(r.patent_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}">
+    // Ownership badge
+    let ownershipBadge;
+    if (r.divested) {
+      ownershipBadge = `<span class="es-badge es-badge--divested" title="Divested ${r.divested_date || ''}">Divested${r.divested_date ? ' ' + r.divested_date.slice(0, 10) : ''}</span>`;
+    } else if (r.acquired_via_assignment) {
+      ownershipBadge = `<span class="es-badge es-badge--acquired" title="Acquired via assignment ${r.acquired_date || ''}">Acquired${r.acquired_date ? ' ' + r.acquired_date.slice(0, 10) : ''}</span>`;
+    } else {
+      ownershipBadge = `<span class="es-badge es-badge--owned">Owned</span>`;
+    }
+    const rowStyle = r.divested ? ' style="opacity:0.6"' : '';
+    html += `<tr${rowStyle} data-pn="${escHtml(r.patent_number || '')}" data-app="${escHtml(r.application_number || '')}" data-pros="${r.prosecution_status || ''}" data-pros10y="${r.prosecution_status_10y || ''}" data-pgfirst="${r.post_grant_first || ''}" data-pgcurrent="${r.post_grant_current || ''}" data-mf="${escHtml(r.mf_events || '')}" data-changed="${r.status_changed ? '1' : ''}" data-divested="${r.divested ? '1' : ''}" data-acquired="${r.acquired_via_assignment ? '1' : ''}" data-expired="${r.expired ? '1' : ''}">
       <td class="patent-number">${escHtml(r.patent_number || '')}</td>
       <td>${escHtml(r.application_number || '')}</td>
       <td>${escHtml(r.grant_date || '')}</td>
@@ -702,6 +1000,7 @@ function renderApplicantPortfolio(data) {
       <td>${statusBadge(r.post_grant_first)}</td>
       <td>${statusBadge(r.post_grant_current)}</td>
       <td>${changedMark}</td>
+      <td>${ownershipBadge}</td>
     </tr>`;
   }
 
@@ -722,6 +1021,572 @@ function renderApplicantPortfolio(data) {
       filterPatentTable(el.dataset.filter, el.dataset.label, el);
     });
   });
+
+  // Fire async litigation lookup for all granted patents
+  const grantedPatents = data.results
+    .filter(r => r.patent_number)
+    .map(r => r.patent_number);
+  if (grantedPatents.length > 0) {
+    fetchLitigationData(grantedPatents);
+  }
+
+  // Wire prosecution payment analysis button
+  const prosPayBtn = document.getElementById('es-pros-pay-btn');
+  if (prosPayBtn) {
+    prosPayBtn.addEventListener('click', () => fetchProsecutionPayments());
+  }
+}
+
+// ── Litigation Data (async, non-blocking) ──────────────────────
+
+async function fetchLitigationData(patentNumbers) {
+  const kpiSection = document.getElementById('es-litigation-kpis');
+  const statusEl = document.getElementById('es-litigation-status');
+  if (!kpiSection) return;
+  kpiSection.style.display = '';
+
+  try {
+    const data = await apiPost('/api/litigation/lookup', {
+      patent_numbers: patentNumbers,
+    });
+
+    // Store for micro chart injection + litigation table
+    window._litigationData = data.litigated_patents || {};
+    window._litigationCases = data.cases || [];
+
+    const cases = window._litigationCases;
+    const litigatedCount = data.litigated_count || 0;
+    const totalCases = data.total_cases || 0;
+    const activeCases = cases.filter(c => _isActiveCase(c)).length;
+    const resolvedCases = totalCases - activeCases;
+    const uniqueCourts = new Set(cases.map(c => c.court).filter(Boolean)).size;
+
+    // Populate KPI values with clickable spans
+    const litKpi = (id, val, filter, label) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = val
+        ? `<span class="kpi-clickable lit-kpi" data-litfilter="${filter}" data-label="${label}">${val.toLocaleString()}</span>`
+        : '0';
+    };
+    litKpi('es-litigated-count', litigatedCount, 'all', 'Litigated Patents');
+    litKpi('es-total-cases', totalCases, 'all', 'All Litigation Cases');
+    litKpi('es-active-cases', activeCases, 'active', 'Active Cases');
+    litKpi('es-resolved-cases', resolvedCases, 'resolved', 'Resolved Cases');
+    litKpi('es-courts-count', uniqueCourts, 'all', 'All Litigation Cases');
+
+    statusEl.textContent = `${data.from_cache || 0} from cache, ${data.freshly_queried || 0} freshly queried`;
+
+    // Set data-litigated on table rows
+    const tbl = document.getElementById('es-app-table');
+    if (tbl) {
+      tbl.querySelectorAll('tbody tr').forEach(row => {
+        const pn = row.dataset.pn;
+        if (pn && window._litigationData[pn]) {
+          row.dataset.litigated = '1';
+        }
+      });
+    }
+
+    // Wire litigation KPI clicks
+    kpiSection.querySelectorAll('.lit-kpi').forEach(el => {
+      el.addEventListener('click', () => {
+        const filter = el.dataset.litfilter;
+        const label = el.dataset.label;
+
+        // Toggle off if same KPI clicked again
+        if (el.classList.contains('kpi-active')) {
+          el.classList.remove('kpi-active');
+          hideLitigationTable();
+          // Reset patent table if "Litigated Patents" was active
+          const tbl = document.getElementById('es-app-table');
+          if (tbl) {
+            const rows = tbl.querySelectorAll('tbody tr');
+            rows.forEach(r => { r.style.display = ''; });
+            const filterLabel = document.getElementById('es-filter-label');
+            const shownCount = document.getElementById('es-shown-count');
+            if (filterLabel) filterLabel.classList.add('hidden');
+            if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+          }
+          clearMicroCharts();
+          return;
+        }
+
+        // Clear previous active highlights (both patent KPIs and lit KPIs)
+        appArea.querySelectorAll('.kpi-active').forEach(a => a.classList.remove('kpi-active'));
+        el.classList.add('kpi-active');
+
+        // Show litigation table with appropriate filter
+        if (filter === 'active') {
+          renderLitigationTable(c => _isActiveCase(c), label);
+        } else if (filter === 'resolved') {
+          renderLitigationTable(c => !_isActiveCase(c), label);
+        } else {
+          renderLitigationTable(null, label);
+        }
+
+        // If "Litigated Patents" KPI, also filter the patent table
+        if (el.closest('#es-litigated-count')) {
+          _filterPatentTableForLitigation();
+        }
+      });
+    });
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
+}
+
+/** Check if a case is active (not closed/terminated). */
+function _isActiveCase(c) {
+  const s = (c.status || '').toLowerCase();
+  return s !== 'closed' && s !== 'terminated' && s !== 'resolved' && s !== 'settled';
+}
+
+/** Filter patent table to show only litigated patents. */
+function _filterPatentTableForLitigation() {
+  const tbl = document.getElementById('es-app-table');
+  if (!tbl) return;
+  const rows = tbl.querySelectorAll('tbody tr');
+  let shown = 0;
+  const visiblePatents = [];
+  rows.forEach(row => {
+    const match = row.dataset.litigated === '1';
+    row.style.display = match ? '' : 'none';
+    if (match) {
+      shown++;
+      const pn = row.dataset.pn;
+      if (pn) visiblePatents.push(pn);
+    }
+  });
+  const filterLabel = document.getElementById('es-filter-label');
+  const shownCount = document.getElementById('es-shown-count');
+  if (filterLabel) {
+    filterLabel.innerHTML = `Filtered: <strong>Litigated Patents</strong> &mdash; ${shown.toLocaleString()} of ${rows.length.toLocaleString()} patents <button class="es-filter-clear" title="Clear filter">&times;</button>`;
+    filterLabel.classList.remove('hidden');
+    filterLabel.querySelector('.es-filter-clear')?.addEventListener('click', () => {
+      appArea.querySelectorAll('.kpi-active').forEach(a => a.classList.remove('kpi-active'));
+      rows.forEach(r => { r.style.display = ''; });
+      filterLabel.classList.add('hidden');
+      if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+      hideLitigationTable();
+      clearMicroCharts();
+    });
+  }
+  if (shownCount) shownCount.textContent = `${shown.toLocaleString()} shown`;
+
+  // Fetch and render micro charts for visible litigated patents
+  if (visiblePatents.length > 0) {
+    fetchAndRenderMicroCharts(visiblePatents, 'litigation:litigated');
+  } else {
+    clearMicroCharts();
+  }
+}
+
+/** Render the litigation cases table. */
+function renderLitigationTable(filterFn, title) {
+  const wrap = document.getElementById('es-litigation-table-wrap');
+  if (!wrap) return;
+
+  const cases = window._litigationCases || [];
+  const filtered = filterFn ? cases.filter(filterFn) : cases;
+
+  let html = `<h4 style="font-size:1rem;margin-bottom:0.5rem">${escHtml(title || 'Litigation Cases')} (${filtered.length})</h4>`;
+  html += '<div class="table-scroll-wrap"><table id="es-litigation-table" class="data-table"><thead><tr>';
+
+  const cols = [
+    { key: 'case_no', label: 'Case' },
+    { key: 'filed_date', label: 'Filing Date' },
+    { key: 'status', label: 'Status' },
+    { key: 'court', label: 'Court' },
+    { key: 'plaintiff', label: 'Plaintiff' },
+    { key: 'defendant', label: 'Defendant' },
+    { key: 'cause_of_action', label: 'Cause of Action' },
+    { key: 'entity_type', label: 'Plaintiff Entity Type' },
+    { key: 'industry', label: 'Industry' },
+    { key: 'flag', label: 'Source' },
+    { key: 'portfolio_patents', label: 'Patents in Case' },
+    { key: 'judge', label: 'Judge' },
+    { key: 'closed_date', label: 'Termination Date' },
+    { key: 'product', label: 'Infringed Product' },
+  ];
+  const defaultHidden = ['Cause of Action', 'Plaintiff Entity Type', 'Industry', 'Source', 'Patents in Case', 'Judge', 'Termination Date', 'Infringed Product'];
+
+  for (const col of cols) {
+    html += `<th>${escHtml(col.label)}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const c of filtered) {
+    html += '<tr>';
+    for (const col of cols) {
+      let val = c[col.key] || '';
+      if (col.key === 'portfolio_patents' && Array.isArray(val)) {
+        val = val.join(', ');
+      }
+      html += `<td>${escHtml(String(val))}</td>`;
+    }
+    html += '</tr>';
+  }
+
+  html += '</tbody></table></div>';
+  wrap.innerHTML = html;
+  wrap.style.display = '';
+
+  const litTbl = document.getElementById('es-litigation-table');
+  if (litTbl) {
+    stampOriginalOrder(litTbl);
+    enableTableSorting(litTbl);
+    addColumnPicker(litTbl, { defaultHidden });
+  }
+}
+
+/** Hide the litigation table. */
+function hideLitigationTable() {
+  const wrap = document.getElementById('es-litigation-table-wrap');
+  if (wrap) {
+    wrap.innerHTML = '';
+    wrap.style.display = 'none';
+  }
+}
+
+// ── Prosecution Payment Analysis ─────────────────────────────────
+
+/**
+ * Fetch prosecution payment data for all applications in the table.
+ * Builds status segments + payment events, populates KPIs and tables.
+ */
+async function fetchProsecutionPayments() {
+  const tbl = document.getElementById('es-app-table');
+  const statusEl = document.getElementById('es-pros-pay-status');
+  const kpisEl = document.getElementById('es-pros-pay-kpis');
+  const btn = document.getElementById('es-pros-pay-btn');
+  if (!tbl) return;
+
+  // Collect all application numbers from table rows
+  const allApps = [];
+  tbl.querySelectorAll('tbody tr').forEach(row => {
+    const app = row.dataset.app;
+    if (app) allApps.push(app);
+  });
+
+  if (allApps.length === 0) {
+    if (statusEl) statusEl.textContent = 'No applications found in table.';
+    return;
+  }
+
+  // Disable button during fetch
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+  if (statusEl) statusEl.textContent = `Analyzing ${allApps.length.toLocaleString()} applications...`;
+
+  try {
+    // Batch into groups of 200
+    const BATCH = 200;
+    const batches = [];
+    for (let i = 0; i < allApps.length; i += BATCH) {
+      batches.push(allApps.slice(i, i + BATCH));
+    }
+
+    // Fetch all batches (sequential to avoid overloading)
+    const merged = {
+      timelines: {},
+      payments_detail: [],
+      summary: {},
+      kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0,
+              small_10y: 0, micro_10y: 0, large_10y: 0, total_10y: 0, apps_with_findings_10y: 0,
+              reduced_paid: 0, reduced_large_rate: 0, reduced_underpayment: 0,
+              reduced_paid_10y: 0, reduced_large_rate_10y: 0, reduced_underpayment_10y: 0 },
+      date_range: null,
+      cache_stats: { from_cache: 0, freshly_analyzed: 0 },
+    };
+
+    for (let i = 0; i < batches.length; i++) {
+      if (statusEl) statusEl.textContent = `Analyzing batch ${i + 1} of ${batches.length}...`;
+      const resp = await apiPost('/api/entity-status/prosecution-timelines', {
+        application_numbers: batches[i],
+      });
+
+      // Merge timelines
+      Object.assign(merged.timelines, resp.timelines || {});
+
+      // Merge payments_detail
+      if (resp.payments_detail) merged.payments_detail.push(...resp.payments_detail);
+
+      // Merge summary (year → code → count)
+      for (const [yr, codes] of Object.entries(resp.summary || {})) {
+        if (!merged.summary[yr]) merged.summary[yr] = {};
+        for (const [code, cnt] of Object.entries(codes)) {
+          merged.summary[yr][code] = (merged.summary[yr][code] || 0) + cnt;
+        }
+      }
+
+      // Merge KPIs
+      const k = resp.kpis || {};
+      merged.kpis.small += k.small || 0;
+      merged.kpis.micro += k.micro || 0;
+      merged.kpis.large += k.large || 0;
+      merged.kpis.total += k.total || 0;
+      merged.kpis.small_10y += k.small_10y || 0;
+      merged.kpis.micro_10y += k.micro_10y || 0;
+      merged.kpis.large_10y += k.large_10y || 0;
+      merged.kpis.total_10y += k.total_10y || 0;
+      // Dollar KPIs (reduced-rate only — Small + Micro)
+      merged.kpis.reduced_paid += k.reduced_paid || 0;
+      merged.kpis.reduced_large_rate += k.reduced_large_rate || 0;
+      merged.kpis.reduced_underpayment += k.reduced_underpayment || 0;
+      merged.kpis.reduced_paid_10y += k.reduced_paid_10y || 0;
+      merged.kpis.reduced_large_rate_10y += k.reduced_large_rate_10y || 0;
+      merged.kpis.reduced_underpayment_10y += k.reduced_underpayment_10y || 0;
+      // apps_with_findings must be re-counted from merged timelines
+      // (app might appear in multiple batches — unlikely but safe)
+
+      // Merge date_range
+      if (resp.date_range) {
+        if (!merged.date_range) {
+          merged.date_range = { ...resp.date_range };
+        } else {
+          if (resp.date_range.min < merged.date_range.min) merged.date_range.min = resp.date_range.min;
+          if (resp.date_range.max > merged.date_range.max) merged.date_range.max = resp.date_range.max;
+        }
+      }
+
+      // Merge cache stats
+      const cs = resp.cache_stats || {};
+      merged.cache_stats.from_cache += cs.from_cache || 0;
+      merged.cache_stats.freshly_analyzed += cs.freshly_analyzed || 0;
+    }
+
+    // Recount apps_with_findings from merged data
+    const appsWithFindings = new Set();
+    const appsWithFindings10y = new Set();
+    const tenYrCutoff = new Date();
+    tenYrCutoff.setFullYear(tenYrCutoff.getFullYear() - 10);
+    const tenYrStr = tenYrCutoff.toISOString().slice(0, 10);
+    for (const [an, tl] of Object.entries(merged.timelines)) {
+      if (tl.payments) {
+        for (const p of tl.payments) {
+          if (p.status === 'SMALL' || p.status === 'MICRO') {
+            appsWithFindings.add(an);
+            if (p.d && p.d >= tenYrStr) appsWithFindings10y.add(an);
+          }
+        }
+      }
+    }
+    merged.kpis.apps_with_findings = appsWithFindings.size;
+    merged.kpis.apps_with_findings_10y = appsWithFindings10y.size;
+
+    // Store globally for sparkline injection
+    window._prosecutionData = merged;
+
+    // Populate KPIs
+    const setKpi = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val.toLocaleString();
+    };
+    setKpi('es-pros-pay-small', merged.kpis.small);
+    setKpi('es-pros-pay-micro', merged.kpis.micro);
+    setKpi('es-pros-pay-large', merged.kpis.large);
+    setKpi('es-pros-pay-total', merged.kpis.total);
+    setKpi('es-pros-pay-apps', merged.kpis.apps_with_findings);
+    setKpi('es-pros-pay-small-10y', merged.kpis.small_10y || 0);
+    setKpi('es-pros-pay-micro-10y', merged.kpis.micro_10y || 0);
+    setKpi('es-pros-pay-large-10y', merged.kpis.large_10y || 0);
+    setKpi('es-pros-pay-total-10y', merged.kpis.total_10y || 0);
+    setKpi('es-pros-pay-apps-10y', merged.kpis.apps_with_findings_10y || 0);
+
+    // Dollar KPIs
+    const setDollar = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '$' + Math.round(val).toLocaleString();
+    };
+    setDollar('es-pros-pay-dollars-paid', merged.kpis.reduced_paid);
+    setDollar('es-pros-pay-dollars-large', merged.kpis.reduced_large_rate);
+    setDollar('es-pros-pay-dollars-delta', merged.kpis.reduced_underpayment);
+    setDollar('es-pros-pay-dollars-paid-10y', merged.kpis.reduced_paid_10y);
+    setDollar('es-pros-pay-dollars-large-10y', merged.kpis.reduced_large_rate_10y);
+    setDollar('es-pros-pay-dollars-delta-10y', merged.kpis.reduced_underpayment_10y);
+
+    if (kpisEl) kpisEl.style.display = '';
+
+    // Set data-prospay on table rows (comma-separated statuses)
+    tbl.querySelectorAll('tbody tr').forEach(row => {
+      const app = row.dataset.app;
+      if (!app || !merged.timelines[app]) return;
+      const statuses = new Set();
+      for (const p of (merged.timelines[app].payments || [])) {
+        statuses.add(p.status);
+      }
+      row.dataset.prospay = [...statuses].join(',');
+    });
+
+    // Wire KPI click handlers for the prosecution payment section
+    const prosPaySection = document.getElementById('es-pros-payments');
+    if (prosPaySection) {
+      prosPaySection.querySelectorAll('.kpi-clickable').forEach(el => {
+        el.addEventListener('click', () => {
+          filterPatentTable(el.dataset.filter, el.dataset.label, el);
+        });
+      });
+    }
+
+    // Render summary and detail tables
+    renderProsecutionSummaryTable(merged);
+    renderProsecutionDetailTable(merged);
+
+    // Re-render sparklines with prosecution data injected
+    const visiblePatents = [];
+    tbl.querySelectorAll('tbody tr').forEach(row => {
+      if (row.style.display !== 'none' && row.dataset.pn) {
+        visiblePatents.push(row.dataset.pn);
+      }
+    });
+    if (visiblePatents.length > 0) {
+      fetchAndRenderMicroCharts(visiblePatents);
+    }
+
+    const cacheMsg = merged.cache_stats.from_cache > 0
+      ? ` (${merged.cache_stats.from_cache.toLocaleString()} from cache, ${merged.cache_stats.freshly_analyzed.toLocaleString()} freshly analyzed)`
+      : '';
+    if (statusEl) statusEl.textContent = `Analysis complete. ${merged.kpis.total.toLocaleString()} payment events found across ${allApps.length.toLocaleString()} applications${cacheMsg}.`;
+    if (btn) { btn.textContent = 'Re-Analyze'; btn.disabled = false; }
+
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `Error: ${err.message || err}`;
+    if (btn) { btn.textContent = 'Retry Analysis'; btn.disabled = false; }
+  }
+}
+
+/** Render prosecution payment summary pivot table (Year × Event Code). */
+function renderProsecutionSummaryTable(data) {
+  const wrap = document.getElementById('es-pros-summary-wrap');
+  if (!wrap) return;
+
+  const summary = data.summary || {};
+  const years = Object.keys(summary).sort();
+  if (years.length === 0) {
+    wrap.innerHTML = '<p class="text-muted">No prosecution payments found.</p>';
+    wrap.style.display = '';
+    return;
+  }
+
+  // Collect all event codes across all years
+  const allCodes = new Set();
+  for (const yr of years) {
+    for (const code of Object.keys(summary[yr])) {
+      allCodes.add(code);
+    }
+  }
+  const codes = [...allCodes].sort();
+
+  let html = `
+    <div class="card">
+      <h4 class="card-title" style="font-size:1rem">Payment Summary by Year</h4>
+      <p class="text-muted" style="margin:0 0 0.5rem">All prosecution payments (Small + Micro + Large rate)</p>
+      <div class="table-scroll-wrap">
+        <table class="data-table" id="es-pros-summary-table">
+          <thead><tr>
+            <th data-sort-key="0">Year</th>`;
+  codes.forEach((c, i) => {
+    const desc = PROS_PAY_DESCRIPTIONS[c] || c;
+    html += `<th data-sort-key="${i + 1}" style="text-align:right" title="${escHtml(desc)}">${escHtml(c)}</th>`;
+  });
+  html += `<th style="text-align:right;font-weight:700">Total</th></tr></thead><tbody>`;
+
+  const colTotals = {};
+  let grandTotal = 0;
+
+  for (const yr of years) {
+    let rowTotal = 0;
+    html += `<tr><td style="font-weight:600">${escHtml(yr)}</td>`;
+    for (const code of codes) {
+      const cnt = summary[yr][code] || 0;
+      rowTotal += cnt;
+      colTotals[code] = (colTotals[code] || 0) + cnt;
+      html += `<td style="text-align:right">${cnt || ''}</td>`;
+    }
+    grandTotal += rowTotal;
+    html += `<td style="text-align:right;font-weight:600">${rowTotal}</td></tr>`;
+  }
+
+  // Footer row
+  html += `</tbody><tfoot><tr style="border-top:2px solid var(--color-border)"><td style="font-weight:700">Total</td>`;
+  for (const code of codes) {
+    html += `<td style="text-align:right;font-weight:600">${colTotals[code] || 0}</td>`;
+  }
+  html += `<td style="text-align:right;font-weight:700">${grandTotal}</td></tr></tfoot></table></div></div>`;
+
+  wrap.innerHTML = html;
+  wrap.style.display = '';
+
+  const tbl = document.getElementById('es-pros-summary-table');
+  if (tbl) {
+    stampOriginalOrder(tbl);
+    enableTableSorting(tbl);
+    addColumnPicker(tbl);
+  }
+}
+
+/** Render detailed prosecution payment table (Small + Micro findings only). */
+function renderProsecutionDetailTable(data) {
+  const wrap = document.getElementById('es-pros-detail-wrap');
+  if (!wrap) return;
+
+  const details = data.payments_detail || [];
+  if (details.length === 0) {
+    wrap.innerHTML = '<div class="card"><p class="text-muted">No Small or Micro rate payments found.</p></div>';
+    wrap.style.display = '';
+    return;
+  }
+
+  let html = `
+    <div class="card">
+      <h4 class="card-title" style="font-size:1rem">Flagged Payments — Small &amp; Micro Rate</h4>
+      <p class="text-muted" style="margin:0 0 0.5rem">${details.length.toLocaleString()} payment events made at reduced entity rates</p>
+      <div class="table-scroll-wrap">
+        <table class="data-table" id="es-pros-detail-table">
+          <thead><tr>
+            <th data-sort-key="0">App #</th>
+            <th data-sort-key="1">Date</th>
+            <th data-sort-key="2">Code</th>
+            <th data-sort-key="3">Description</th>
+            <th data-sort-key="4">Status</th>
+            <th data-sort-key="5" style="text-align:right">Paid ($)</th>
+            <th data-sort-key="6" style="text-align:right">Large ($)</th>
+            <th data-sort-key="7" style="text-align:right">Underpay ($)</th>
+            <th data-sort-key="8">Fee Category</th>
+            <th data-sort-key="9">Origin Code</th>
+            <th data-sort-key="10">Origin Date</th>
+          </tr></thead><tbody>`;
+
+  for (const d of details) {
+    const paid = d.amount_paid || 0;
+    const large = d.large_rate || 0;
+    const underpay = d.underpayment || 0;
+    const catLabel = (d.fee_category || '').replace(/_/g, ' ');
+    html += `<tr>
+      <td>${escHtml(d.application_number || '')}</td>
+      <td>${escHtml(d.event_date || '')}</td>
+      <td title="${escHtml(PROS_PAY_DESCRIPTIONS[d.event_code] || d.event_code || '')}">${escHtml(d.event_code || '')}</td>
+      <td>${escHtml(d.event_description || '')}</td>
+      <td>${statusBadge(d.claimed_status)}</td>
+      <td style="text-align:right">$${paid.toLocaleString()}</td>
+      <td style="text-align:right">$${large.toLocaleString()}</td>
+      <td style="text-align:right${underpay > 0 ? ';color:#dc2626;font-weight:600' : ''}">$${underpay.toLocaleString()}</td>
+      <td>${escHtml(catLabel)}</td>
+      <td>${escHtml(d.origin_code || '')}</td>
+      <td>${escHtml(d.origin_date || '')}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table></div></div>';
+  wrap.innerHTML = html;
+  wrap.style.display = '';
+
+  const tbl = document.getElementById('es-pros-detail-table');
+  if (tbl) {
+    stampOriginalOrder(tbl);
+    enableTableSorting(tbl);
+    addColumnPicker(tbl);
+  }
 }
 
 // ── Patent Table Filtering (for clickable KPIs) ─────────────────
@@ -745,6 +1610,7 @@ function filterPatentTable(filterSpec, label, clickedEl) {
     rows.forEach(row => { row.style.display = ''; });
     if (filterLabel) filterLabel.classList.add('hidden');
     if (shownCount) shownCount.textContent = `${rows.length.toLocaleString()} shown`;
+    hideLitigationTable();
     clearMicroCharts();
     return;
   }
@@ -752,6 +1618,9 @@ function filterPatentTable(filterSpec, label, clickedEl) {
   // Clear previous active highlight
   if (prevActive) prevActive.classList.remove('kpi-active');
   clickedEl.classList.add('kpi-active');
+
+  // Hide litigation table when a non-litigation KPI is clicked
+  hideLitigationTable();
 
   // Parse filter spec — "field:val1,val2"
   const colonIdx = filterSpec.indexOf(':');
@@ -769,6 +1638,29 @@ function filterPatentTable(filterSpec, label, clickedEl) {
       match = codes.includes(row.dataset.pros);
     } else if (field === 'pros10y') {
       match = codes.includes(row.dataset.pros10y);
+    } else if (field === 'ownership') {
+      if (codes.includes('divested')) match = row.dataset.divested === '1';
+      else if (codes.includes('acquired')) match = row.dataset.acquired === '1';
+    } else if (field === 'portfolio') {
+      const code = codes[0];
+      const isGranted = !!row.dataset.pn;
+      const isPending = !isGranted;
+      const isDivested = row.dataset.divested === '1';
+      const isAcquired = row.dataset.acquired === '1';
+      const isExpired = row.dataset.expired === '1';
+      if (code === 'filed_granted') match = isGranted && !isAcquired;
+      else if (code === 'acquired_granted') match = isGranted && isAcquired;
+      else if (code === 'divested_granted') match = isGranted && isDivested;
+      else if (code === 'expired_granted') match = isGranted && !isDivested && isExpired;
+      else if (code === 'filed_pending') match = isPending && !isAcquired;
+      else if (code === 'acquired_pending') match = isPending && isAcquired;
+      else if (code === 'divested_pending') match = isPending && isDivested;
+    } else if (field === 'litigation') {
+      if (codes.includes('litigated')) match = row.dataset.litigated === '1';
+    } else if (field === 'prospay') {
+      // Filter by prosecution payment status (data set after analysis)
+      const ppStatuses = (row.dataset.prospay || '').split(',').filter(Boolean);
+      match = codes.some(c => ppStatuses.includes(c));
     }
     row.style.display = match ? '' : 'none';
     if (match) {
@@ -865,6 +1757,67 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
       } else {
         if (r.date_range.min < data.date_range.min) data.date_range.min = r.date_range.min;
         if (r.date_range.max > data.date_range.max) data.date_range.max = r.date_range.max;
+      }
+    }
+
+    // Inject litigation events into timelines (if loaded)
+    if (window._litigationData) {
+      for (const [pn, cases] of Object.entries(window._litigationData)) {
+        if (!data.timelines[pn]) continue;
+        for (const c of cases) {
+          if (c.filed_date) {
+            data.timelines[pn].push({ d: c.filed_date, c: 'LITG', _case: c });
+          }
+        }
+        data.timelines[pn].sort((a, b) => a.d.localeCompare(b.d));
+      }
+    }
+
+    // Inject prosecution payment events into timelines (if loaded)
+    if (window._prosecutionData) {
+      // Build pn→app map from table rows
+      const pnToApp = {};
+      tbl.querySelectorAll('tbody tr').forEach(row => {
+        const pn = row.dataset.pn;
+        const app = row.dataset.app;
+        if (pn && app) pnToApp[pn] = app;
+      });
+
+      for (const [pn, app] of Object.entries(pnToApp)) {
+        const prosTimeline = window._prosecutionData.timelines[app];
+        if (!prosTimeline || !prosTimeline.payments) continue;
+        if (!data.timelines[pn]) data.timelines[pn] = [];
+
+        for (const p of prosTimeline.payments) {
+          data.timelines[pn].push({
+            d: p.d,
+            c: 'PROS_PAY',
+            _prosCode: p.c,
+            _prosDesc: p.desc,
+            _prosStatus: p.status,
+          });
+        }
+
+        // Also inject prosecution status-change events for line coloring
+        for (const seg of prosTimeline.segments) {
+          if (seg.trigger) {
+            data.timelines[pn].push({
+              d: seg.start,
+              c: seg.trigger,
+            });
+          }
+        }
+
+        data.timelines[pn].sort((a, b) => a.d.localeCompare(b.d));
+
+        // Expand date range if prosecution data extends earlier
+        if (prosTimeline.segments.length > 0) {
+          const earliest = prosTimeline.segments[0].start;
+          if (earliest && (!data.date_range || earliest < data.date_range.min)) {
+            if (!data.date_range) data.date_range = { min: earliest, max: earliest };
+            else data.date_range.min = earliest;
+          }
+        }
       }
     }
 
@@ -968,6 +1921,15 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
           marker.style.left = pct + '%';
           marker.style.backgroundColor = '#92400e';
           marker.title = `${ev.c} \u2014 ${ev.d}`;
+        } else if (cat === 'pros_payment') {
+          const prosColor = ev._prosStatus === 'SMALL' ? STATUS_COLORS.small
+            : ev._prosStatus === 'MICRO' ? STATUS_COLORS.micro
+            : STATUS_COLORS.large;
+          marker = createIconEl(svgDollar, prosColor, pct, ev);
+          marker.title = `${ev._prosCode || ''} (${ev._prosStatus || ''}) \u2014 ${ev.d}${ev._prosDesc ? ' \u2014 ' + ev._prosDesc : ''}`;
+        } else if (cat === 'litigation') {
+          marker = createIconEl(svgStar, '#d4a017', pct, ev);
+          marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
         } else if (cat.startsWith('trans_to_')) {
           // Transitions: gray dot on the line to mark the event
           marker = document.createElement('div');
@@ -1066,6 +2028,27 @@ function showMicroChartLegend() {
     item.className = 'es-microchart-legend-item';
     item.innerHTML = `<span class="es-microchart-legend-dot" style="background:${color}"></span>${escHtml(label)}`;
     legend.appendChild(item);
+  }
+
+  // Litigation star
+  const litItem = document.createElement('span');
+  litItem.className = 'es-microchart-legend-item';
+  litItem.innerHTML = `<span class="es-microchart-legend-icon" style="color:#d4a017">${svgStar()}</span>Litigation`;
+  legend.appendChild(litItem);
+
+  // Prosecution payment $ icons (shown when prosecution data is loaded)
+  if (window._prosecutionData) {
+    const prosEntries = [
+      [STATUS_COLORS.small, 'Small $ Pay'],
+      [STATUS_COLORS.micro, 'Micro $ Pay'],
+      [STATUS_COLORS.large, 'Large $ Pay'],
+    ];
+    for (const [color, label] of prosEntries) {
+      const item = document.createElement('span');
+      item.className = 'es-microchart-legend-item';
+      item.innerHTML = `<span class="es-microchart-legend-icon" style="color:${color}">${svgDollar()}</span>${escHtml(label)}`;
+      legend.appendChild(item);
+    }
   }
 
   legend.classList.remove('hidden');
