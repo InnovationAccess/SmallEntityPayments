@@ -1372,11 +1372,11 @@ def _get_algorithm_payments(bq_client, app_num: str) -> List[dict]:
             pass
 
     # Cache miss — run the analysis
-    # Import here to avoid circular imports
+    # _analyze_prosecution_apps returns Dict[str, dict] keyed by app number
     from api.routers.entity_status import _analyze_prosecution_apps
     try:
         result = _analyze_prosecution_apps([app_num])
-        timeline = result.get("timelines", {}).get(app_num, {})
+        timeline = result.get(app_num, {})
         return timeline.get("payments", [])
     except Exception as e:
         logger.warning("Algorithm analysis failed for %s: %s", app_num, e)
