@@ -1650,3 +1650,169 @@ def get_invoice_pdf(
             status_code=500,
             detail=f"Failed to get invoice PDF: {e}",
         )
+
+
+# ── Extraction Pipeline Endpoints ───────────────────────────────
+
+
+class StartPipelineRequest(BaseModel):
+    """Trigger the invoice extraction pipeline for an entity."""
+    entity_name: str
+    parallel_downloads: int = 5
+    max_apps: int = 0  # 0 = unlimited
+
+
+@router.post("/start-pipeline")
+def start_pipeline(req: StartPipelineRequest) -> Dict[str, Any]:
+    """Trigger the invoice extraction pipeline as a Cloud Run Job.
+
+    The pipeline downloads payment PDFs from USPTO, stores them in GCS,
+    extracts structured data using pdfplumber, and falls back to Gemini
+    for failures. Progress is tracked in BigQuery for real-time monitoring.
+    """
+    if not req.entity_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="entity_name is required",
+        )
+
+    try:
+        from google.cloud import run_v2
+
+        client = run_v2.JobsClient()
+        job_name = f"projects/uspto-data-app/locations/us-central1/jobs/uspto-extract-invoices"
+
+        # Execute the job with entity-specific env vars
+        request = run_v2.RunJobRequest(
+            name=job_name,
+            overrides=run_v2.RunJobRequest.Overrides(
+                container_overrides=[
+                    run_v2.RunJobRequest.Overrides.ContainerOverride(
+                        env=[
+                            run_v2.EnvVar(name="ENTITY_NAME", value=req.entity_name),
+                            run_v2.EnvVar(name="PARALLEL_DOWNLOADS", value=str(req.parallel_downloads)),
+                            run_v2.EnvVar(name="MAX_APPS", value=str(req.max_apps)),
+                        ],
+                    )
+                ],
+            ),
+        )
+
+        operation = client.run_job(request=request)
+        execution_name = operation.metadata.name if hasattr(operation, 'metadata') else "started"
+
+        return {
+            "status": "started",
+            "entity_name": req.entity_name,
+            "execution_name": str(execution_name),
+            "message": f"Pipeline started for {req.entity_name}. Monitor via /pipeline-status.",
+        }
+
+    except Exception as e:
+        logger.error("Failed to start pipeline: %s", e)
+        # Fall back to running in-process for testing
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start Cloud Run Job: {e}. "
+                   f"Run manually: ENTITY_NAME='{req.entity_name}' python3 scripts/orchestrate_invoice_pipeline.py",
+        )
+
+
+@router.get("/pipeline-status")
+def get_pipeline_status(
+    entity_name: str = Query(..., description="Entity name to check"),
+) -> Dict[str, Any]:
+    """Get real-time pipeline status for an entity.
+
+    Returns current phase, download/extraction counts, and progress percentage.
+    The orchestrator updates this status row every 60 seconds.
+    """
+    client = bigquery.Client(location="us-west1")
+
+    query = """
+    SELECT *
+    FROM `uspto-data-app.uspto_data.invoice_pipeline_status`
+    WHERE entity_name = @entity
+    ORDER BY updated_at DESC
+    LIMIT 1
+    """
+    params = [bigquery.ScalarQueryParameter("entity", "STRING", entity_name)]
+    job_config = bigquery.QueryJobConfig(query_parameters=params)
+    rows = list(client.query(query, job_config=job_config).result())
+
+    if not rows:
+        # Check if there are any extractions for this entity at all
+        count_query = """
+        SELECT COUNT(DISTINCT application_number) as extracted_apps,
+               COUNT(*) as total_docs,
+               COUNTIF(extraction_status = 'extracted') as extracted_docs
+        FROM `uspto-data-app.uspto_data.invoice_extractions`
+        WHERE application_number IN (
+            SELECT DISTINCT application_number
+            FROM `uspto-data-app.uspto_data.pfw_applicants`
+            WHERE UPPER(applicant_name) LIKE CONCAT('%', UPPER(@entity), '%')
+        )
+        """
+        count_rows = list(client.query(count_query, job_config=job_config).result())
+        if count_rows and count_rows[0].extracted_apps > 0:
+            r = count_rows[0]
+            return {
+                "entity_name": entity_name,
+                "phase": "complete" if r.extracted_docs > 0 else "unknown",
+                "total_apps": 0,
+                "downloaded_apps": r.extracted_apps,
+                "downloaded_docs": r.total_docs,
+                "extracted_docs": r.extracted_docs,
+                "failed_docs": 0,
+                "gemini_recovered": 0,
+                "pct_complete": 100 if r.extracted_docs > 0 else 0,
+                "started_at": None,
+                "updated_at": None,
+            }
+
+        return {
+            "entity_name": entity_name,
+            "phase": "not_started",
+            "total_apps": 0,
+            "downloaded_apps": 0,
+            "downloaded_docs": 0,
+            "extracted_docs": 0,
+            "failed_docs": 0,
+            "gemini_recovered": 0,
+            "pct_complete": 0,
+            "started_at": None,
+            "updated_at": None,
+        }
+
+    r = rows[0]
+    total = r.total_apps or 1
+    downloaded = r.downloaded_apps or 0
+    extracted = r.extracted_docs or 0
+    failed = r.failed_docs or 0
+
+    # Calculate progress based on phase
+    if r.phase == "downloading":
+        pct = round(downloaded / total * 50, 1)  # Downloads are 0-50%
+    elif r.phase == "extracting":
+        docs_total = r.downloaded_docs or 1
+        pct = 50 + round(extracted / docs_total * 40, 1)  # Extraction is 50-90%
+    elif r.phase == "gemini_fallback":
+        pct = 90 + round((r.gemini_recovered or 0) / max(failed, 1) * 10, 1)  # Gemini is 90-100%
+    elif r.phase == "complete":
+        pct = 100
+    else:
+        pct = 0
+
+    return {
+        "entity_name": entity_name,
+        "phase": r.phase,
+        "total_apps": r.total_apps,
+        "downloaded_apps": downloaded,
+        "downloaded_docs": r.downloaded_docs or 0,
+        "extracted_docs": extracted,
+        "failed_docs": failed,
+        "gemini_recovered": r.gemini_recovered or 0,
+        "pct_complete": min(pct, 100),
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+    }

@@ -1,0 +1,492 @@
+#!/usr/bin/env python3
+"""Orchestrate the full invoice extraction pipeline for an entity.
+
+This is a Cloud Run Job entrypoint that manages the entire pipeline:
+  Phase 1: Download payment PDFs from USPTO to GCS (parallel threads)
+  Phase 2: Extract data from PDFs using pdfplumber (parallel threads)
+  Phase 3: Gemini fallback for extraction failures (rate-limited)
+
+All state is tracked in BigQuery for resumability. If the job times out
+or fails, re-running it picks up where it left off.
+
+Environment variables:
+  ENTITY_NAME — entity to process (required)
+  PARALLEL_DOWNLOADS — number of parallel download threads (default 5)
+  MAX_APPS — limit for testing (default: all)
+  GCP_PROJECT_ID — GCP project (default: uspto-data-app)
+  BIGQUERY_DATASET — BQ dataset (default: uspto_data)
+  SKIP_GEMINI — set to "1" to skip Gemini fallback phase
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+
+# Add project root to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from google.cloud import bigquery, storage
+
+from utils.invoice_extraction import (
+    download_pdf_bytes,
+    extract_with_gemini,
+    extract_with_pdfplumber,
+    find_payment_docs,
+    get_downloaded_apps,
+    save_extraction,
+    update_pipeline_status,
+    upload_pdf_to_gcs,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+# ── Configuration ────────────────────────────────────────────────
+
+ENTITY_NAME = os.environ.get("ENTITY_NAME", "")
+PARALLEL_DOWNLOADS = int(os.environ.get("PARALLEL_DOWNLOADS", "5"))
+MAX_APPS = int(os.environ.get("MAX_APPS", "0"))  # 0 = unlimited
+SKIP_GEMINI = os.environ.get("SKIP_GEMINI", "0") == "1"
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "uspto-data-app")
+BQ_DATASET = os.environ.get("BIGQUERY_DATASET", "uspto_data")
+
+
+def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
+    """Get all application numbers for an entity (same portfolio query as entity_status.py)."""
+    query = f"""
+    SELECT DISTINCT application_number FROM (
+        -- Source 1: pfw_applicants
+        SELECT DISTINCT application_number
+        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_applicants`
+        WHERE UPPER(applicant_name) LIKE CONCAT('%', UPPER(@entity), '%')
+
+        UNION DISTINCT
+
+        -- Source 2: pfw_inventors (for individual inventors)
+        SELECT DISTINCT application_number
+        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_inventors`
+        WHERE UPPER(CONCAT(last_name, ', ', first_name)) LIKE CONCAT('%', UPPER(@entity), '%')
+
+        UNION DISTINCT
+
+        -- Source 3: pat_assign_assignees (acquired via assignment)
+        SELECT DISTINCT d.application_number
+        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_assignees` a
+        JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_documents` d
+          ON a.reel_frame = d.reel_frame
+        WHERE UPPER(a.name) LIKE CONCAT('%', UPPER(@entity), '%')
+    )
+    ORDER BY application_number
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("entity", "STRING", ENTITY_NAME)
+        ]
+    )
+    rows = list(bq_client.query(query, job_config=job_config).result())
+    return [r.application_number for r in rows]
+
+
+def download_app_docs(
+    bq_client: bigquery.Client,
+    gcs_client: storage.Client,
+    app_number: str,
+) -> dict:
+    """Download all payment documents for one application.
+
+    Returns: {app_number, docs_found, docs_downloaded, errors}
+    """
+    result = {"app_number": app_number, "docs_found": 0, "docs_downloaded": 0, "errors": []}
+
+    try:
+        # Find payment docs via USPTO API
+        docs = find_payment_docs(app_number)
+        result["docs_found"] = len(docs)
+
+        for doc_meta in docs:
+            try:
+                # Download PDF bytes
+                pdf_bytes = download_pdf_bytes(doc_meta["download_url"])
+                if pdf_bytes is None:
+                    result["errors"].append(f"Download failed: {doc_meta.get('doc_code')}")
+                    continue
+
+                # Upload to GCS
+                gcs_path = upload_pdf_to_gcs(gcs_client, app_number, doc_meta, pdf_bytes)
+
+                # Save download record to BigQuery (extraction_status='downloaded')
+                save_extraction(
+                    bq_client, app_number, doc_meta,
+                    extraction=None,
+                    gcs_path=gcs_path,
+                    extraction_status="downloaded",
+                )
+
+                result["docs_downloaded"] += 1
+
+            except Exception as e:
+                result["errors"].append(f"{doc_meta.get('doc_code')}: {str(e)[:100]}")
+
+        # Rate limit: 1 second between apps
+        time.sleep(1)
+
+    except Exception as e:
+        result["errors"].append(str(e)[:200])
+
+    return result
+
+
+def extract_single_doc(
+    bq_client: bigquery.Client,
+    gcs_client: storage.Client,
+    row: dict,
+) -> dict:
+    """Extract data from a single downloaded PDF using pdfplumber.
+
+    Returns: {gcs_path, success, method}
+    """
+    gcs_path = row["gcs_path"]
+    app_number = row["application_number"]
+
+    try:
+        # Download PDF from GCS
+        bucket = gcs_client.bucket("uspto-bulk-staging")
+        blob = bucket.blob(gcs_path)
+        pdf_bytes = blob.download_as_bytes()
+
+        # Try pdfplumber extraction
+        extraction = extract_with_pdfplumber(pdf_bytes)
+        if extraction:
+            # Update the existing row — delete and re-insert
+            _update_extraction_status(
+                bq_client, app_number, gcs_path, extraction, "extracted"
+            )
+            return {"gcs_path": gcs_path, "success": True, "method": "pdfplumber"}
+
+        # Mark as failed for Gemini fallback
+        _update_extraction_status(
+            bq_client, app_number, gcs_path, None, "failed"
+        )
+        return {"gcs_path": gcs_path, "success": False, "method": "none"}
+
+    except Exception as e:
+        logger.warning("Extraction error for %s: %s", gcs_path, e)
+        return {"gcs_path": gcs_path, "success": False, "method": "error"}
+
+
+def gemini_extract_single(
+    bq_client: bigquery.Client,
+    gcs_client: storage.Client,
+    row: dict,
+) -> dict:
+    """Run Gemini Vision extraction on a single failed PDF."""
+    gcs_path = row["gcs_path"]
+    app_number = row["application_number"]
+
+    try:
+        bucket = gcs_client.bucket("uspto-bulk-staging")
+        blob = bucket.blob(gcs_path)
+        pdf_bytes = blob.download_as_bytes()
+
+        extraction = extract_with_gemini(pdf_bytes)
+        if extraction:
+            _update_extraction_status(
+                bq_client, app_number, gcs_path, extraction, "extracted"
+            )
+            return {"gcs_path": gcs_path, "success": True, "method": "gemini"}
+
+        return {"gcs_path": gcs_path, "success": False, "method": "gemini_failed"}
+
+    except Exception as e:
+        logger.warning("Gemini extraction error for %s: %s", gcs_path, e)
+        return {"gcs_path": gcs_path, "success": False, "method": "error"}
+
+
+def _update_extraction_status(
+    bq_client: bigquery.Client,
+    app_number: str,
+    gcs_path: str,
+    extraction: dict | None,
+    status: str,
+):
+    """Update the extraction_status and data for an existing row."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    if extraction:
+        fees = extraction.get("fees", [])
+        fees_json = json.dumps(fees) if isinstance(fees, list) else "[]"
+
+        query = """
+        UPDATE `uspto-data-app.uspto_data.invoice_extractions`
+        SET extraction_status = @status,
+            entity_status = @entity_status,
+            fees_json = @fees_json,
+            total_amount = @total_amount,
+            extraction_method = @method,
+            extraction_model = @model,
+            extracted_at = @now,
+            raw_response = @raw_response
+        WHERE application_number = @app AND gcs_path = @gcs_path
+        """
+        params = [
+            bigquery.ScalarQueryParameter("status", "STRING", status),
+            bigquery.ScalarQueryParameter("entity_status", "STRING", extraction.get("entity_status")),
+            bigquery.ScalarQueryParameter("fees_json", "STRING", fees_json),
+            bigquery.ScalarQueryParameter("total_amount", "FLOAT64", extraction.get("total_amount")),
+            bigquery.ScalarQueryParameter("method", "STRING", extraction.get("extraction_method", "")),
+            bigquery.ScalarQueryParameter("model", "STRING", extraction.get("extraction_model", "")),
+            bigquery.ScalarQueryParameter("now", "STRING", now),
+            bigquery.ScalarQueryParameter("raw_response", "STRING", extraction.get("raw_response", "")),
+            bigquery.ScalarQueryParameter("app", "STRING", app_number),
+            bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
+        ]
+    else:
+        query = """
+        UPDATE `uspto-data-app.uspto_data.invoice_extractions`
+        SET extraction_status = @status, extracted_at = @now
+        WHERE application_number = @app AND gcs_path = @gcs_path
+        """
+        params = [
+            bigquery.ScalarQueryParameter("status", "STRING", status),
+            bigquery.ScalarQueryParameter("now", "STRING", now),
+            bigquery.ScalarQueryParameter("app", "STRING", app_number),
+            bigquery.ScalarQueryParameter("gcs_path", "STRING", gcs_path),
+        ]
+
+    job_config = bigquery.QueryJobConfig(query_parameters=params)
+    bq_client.query(query, job_config=job_config).result()
+
+
+# ── Main orchestration ───────────────────────────────────────────
+
+def main():
+    if not ENTITY_NAME:
+        logger.error("ENTITY_NAME environment variable is required")
+        sys.exit(1)
+
+    logger.info("=" * 60)
+    logger.info("Invoice Pipeline Orchestrator")
+    logger.info("Entity: %s", ENTITY_NAME)
+    logger.info("Parallel downloads: %d", PARALLEL_DOWNLOADS)
+    logger.info("Max apps: %s", MAX_APPS or "unlimited")
+    logger.info("=" * 60)
+
+    bq_client = bigquery.Client(project=GCP_PROJECT_ID, location="us-west1")
+    gcs_client = storage.Client(project=GCP_PROJECT_ID)
+
+    # ── Phase 1: DOWNLOAD ─────────────────────────────────────────
+
+    logger.info("Phase 1: Getting entity portfolio...")
+    all_apps = get_entity_app_numbers(bq_client)
+    total_apps = len(all_apps)
+    logger.info("Found %d applications for %s", total_apps, ENTITY_NAME)
+
+    if MAX_APPS > 0:
+        all_apps = all_apps[:MAX_APPS]
+        logger.info("Limited to %d apps for testing", MAX_APPS)
+
+    # Check which apps already have downloads
+    already_downloaded = get_downloaded_apps(bq_client, all_apps)
+    remaining = [a for a in all_apps if a not in already_downloaded]
+    logger.info("Already downloaded: %d, Remaining: %d", len(already_downloaded), len(remaining))
+
+    update_pipeline_status(
+        bq_client, ENTITY_NAME, "downloading",
+        total_apps=len(all_apps),
+        downloaded_apps=len(already_downloaded),
+    )
+
+    if remaining:
+        logger.info("Starting downloads with %d parallel workers...", PARALLEL_DOWNLOADS)
+        total_docs_downloaded = 0
+        download_errors = []
+
+        with ThreadPoolExecutor(max_workers=PARALLEL_DOWNLOADS) as executor:
+            futures = {
+                executor.submit(download_app_docs, bq_client, gcs_client, app): app
+                for app in remaining
+            }
+
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                result = future.result()
+                total_docs_downloaded += result["docs_downloaded"]
+
+                if result["errors"]:
+                    download_errors.extend(result["errors"])
+
+                if completed % 50 == 0 or completed == len(remaining):
+                    logger.info(
+                        "Download progress: %d/%d apps, %d docs downloaded, %d errors",
+                        completed, len(remaining), total_docs_downloaded, len(download_errors),
+                    )
+                    update_pipeline_status(
+                        bq_client, ENTITY_NAME, "downloading",
+                        total_apps=len(all_apps),
+                        downloaded_apps=len(already_downloaded) + completed,
+                        downloaded_docs=total_docs_downloaded,
+                    )
+
+        logger.info("Download phase complete: %d docs, %d errors", total_docs_downloaded, len(download_errors))
+
+    # ── Phase 2: EXTRACT (pdfplumber) ─────────────────────────────
+
+    logger.info("Phase 2: Extracting data from downloaded PDFs...")
+    update_pipeline_status(
+        bq_client, ENTITY_NAME, "extracting",
+        total_apps=len(all_apps),
+        downloaded_apps=len(all_apps),
+    )
+
+    # Get all downloaded-but-not-extracted docs
+    query = """
+    SELECT application_number, gcs_path, doc_code, mail_date
+    FROM `uspto-data-app.uspto_data.invoice_extractions`
+    WHERE extraction_status = 'downloaded'
+      AND application_number IN UNNEST(@apps)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ArrayQueryParameter("apps", "STRING", all_apps)]
+    )
+    unextracted = [dict(r) for r in bq_client.query(query, job_config=job_config).result()]
+    logger.info("Found %d unextracted documents", len(unextracted))
+
+    if unextracted:
+        extracted_count = 0
+        failed_count = 0
+
+        # Use 10 parallel threads for extraction (no rate limits — all from GCS)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {
+                executor.submit(extract_single_doc, bq_client, gcs_client, row): row
+                for row in unextracted
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+                if result["success"]:
+                    extracted_count += 1
+                else:
+                    failed_count += 1
+
+                total_done = extracted_count + failed_count
+                if total_done % 100 == 0 or total_done == len(unextracted):
+                    logger.info(
+                        "Extraction progress: %d/%d done (%d extracted, %d failed)",
+                        total_done, len(unextracted), extracted_count, failed_count,
+                    )
+                    update_pipeline_status(
+                        bq_client, ENTITY_NAME, "extracting",
+                        total_apps=len(all_apps),
+                        downloaded_apps=len(all_apps),
+                        extracted_docs=extracted_count,
+                        failed_docs=failed_count,
+                    )
+
+        logger.info("Extraction complete: %d extracted, %d failed", extracted_count, failed_count)
+
+    # ── Phase 3: GEMINI FALLBACK ──────────────────────────────────
+
+    if not SKIP_GEMINI:
+        # Get failed docs
+        fail_query = """
+        SELECT application_number, gcs_path, doc_code, mail_date
+        FROM `uspto-data-app.uspto_data.invoice_extractions`
+        WHERE extraction_status = 'failed'
+          AND application_number IN UNNEST(@apps)
+        """
+        failed_rows = [dict(r) for r in bq_client.query(fail_query, job_config=job_config).result()]
+        logger.info("Phase 3: %d documents need Gemini fallback", len(failed_rows))
+
+        if failed_rows:
+            update_pipeline_status(
+                bq_client, ENTITY_NAME, "gemini_fallback",
+                total_apps=len(all_apps),
+                downloaded_apps=len(all_apps),
+                failed_docs=len(failed_rows),
+            )
+
+            gemini_success = 0
+            gemini_fail = 0
+
+            # Process sequentially — Gemini free tier is rate-limited
+            # ~1,500 requests/day = ~1 per minute to be safe, but we'll do faster
+            # and handle rate limits
+            for i, row in enumerate(failed_rows):
+                if i >= 1500:
+                    logger.info("Reached Gemini daily limit (1,500). Re-run job for remaining.")
+                    break
+
+                result = gemini_extract_single(bq_client, gcs_client, row)
+                if result["success"]:
+                    gemini_success += 1
+                else:
+                    gemini_fail += 1
+
+                # Rate limit: 2 seconds between Gemini calls
+                time.sleep(2)
+
+                if (i + 1) % 50 == 0:
+                    logger.info(
+                        "Gemini progress: %d/%d (%d recovered, %d still failed)",
+                        i + 1, len(failed_rows), gemini_success, gemini_fail,
+                    )
+                    update_pipeline_status(
+                        bq_client, ENTITY_NAME, "gemini_fallback",
+                        total_apps=len(all_apps),
+                        downloaded_apps=len(all_apps),
+                        failed_docs=len(failed_rows) - gemini_success,
+                        gemini_recovered=gemini_success,
+                    )
+
+            logger.info("Gemini fallback complete: %d recovered, %d still failed", gemini_success, gemini_fail)
+
+    # ── Final summary ─────────────────────────────────────────────
+
+    # Get final counts from BQ
+    summary_query = """
+    SELECT
+      COUNT(*) as total_docs,
+      COUNTIF(extraction_status = 'extracted') as extracted,
+      COUNTIF(extraction_status = 'failed') as failed,
+      COUNTIF(extraction_status = 'downloaded') as still_downloaded,
+      ROUND(SUM(CASE WHEN extraction_status = 'extracted' THEN total_amount ELSE 0 END), 2) as total_dollars
+    FROM `uspto-data-app.uspto_data.invoice_extractions`
+    WHERE application_number IN UNNEST(@apps)
+    """
+    summary = list(bq_client.query(summary_query, job_config=job_config).result())[0]
+
+    update_pipeline_status(
+        bq_client, ENTITY_NAME, "complete",
+        total_apps=len(all_apps),
+        downloaded_apps=len(all_apps),
+        downloaded_docs=summary.total_docs,
+        extracted_docs=summary.extracted,
+        failed_docs=summary.failed,
+        completed=True,
+    )
+
+    logger.info("=" * 60)
+    logger.info("PIPELINE COMPLETE")
+    logger.info("Entity: %s", ENTITY_NAME)
+    logger.info("Applications: %d", len(all_apps))
+    logger.info("Documents: %d total, %d extracted, %d failed",
+                summary.total_docs, summary.extracted, summary.failed)
+    logger.info("Total dollars extracted: $%s", f"{summary.total_dollars:,.2f}" if summary.total_dollars else "0")
+    logger.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
