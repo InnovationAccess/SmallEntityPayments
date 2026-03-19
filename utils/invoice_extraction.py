@@ -53,7 +53,7 @@ PAYMENT_KEYWORDS = [
 # Gemini Vision configuration
 GEMINI_PROJECT = "uspto-data-app"
 GEMINI_LOCATION = "us-central1"
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"  # cheapest vision model (~$0.10/1M input)
 
 GEMINI_PROMPT = """You are analyzing a USPTO patent payment document (PDF image).
 
@@ -523,7 +523,11 @@ def extract_with_gemini(pdf_bytes: bytes) -> Optional[dict]:
                 {"inlineData": {"mimeType": "application/pdf", "data": pdf_b64}},
             ],
         }],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 4096},
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 4096,
+            "mediaResolution": "MEDIA_RESOLUTION_MEDIUM",  # 258 tokens/page vs 1,806 default
+        },
     }
 
     try:

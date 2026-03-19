@@ -1713,6 +1713,114 @@ textarea { resize: vertical; }
   font-size: .9rem;
 }
 
+/* ── Rich Tooltip for Prosecution Payment Icons ──────────────── */
+.es-microchart-tooltip {
+  position: absolute;
+  z-index: 9999;
+  background: #1e293b;
+  color: #f1f5f9;
+  border-radius: 8px;
+  padding: .6rem .75rem;
+  font-size: .78rem;
+  line-height: 1.45;
+  max-width: 360px;
+  min-width: 200px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  pointer-events: auto;
+}
+.es-microchart-tooltip .tt-header {
+  font-weight: 700;
+  font-size: .82rem;
+  margin-bottom: .25rem;
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-wrap: wrap;
+}
+.es-microchart-tooltip .tt-desc {
+  color: #94a3b8;
+  font-size: .75rem;
+  margin-bottom: .2rem;
+}
+.es-microchart-tooltip .tt-algo {
+  color: #cbd5e1;
+  font-size: .75rem;
+  margin-bottom: .15rem;
+}
+.es-microchart-tooltip .tt-delta {
+  color: #fbbf24;
+  font-weight: 600;
+}
+.es-microchart-tooltip .tt-divider {
+  border-top: 1px solid #334155;
+  margin: .35rem 0;
+}
+.es-microchart-tooltip .tt-ext-header {
+  font-weight: 600;
+  color: #60a5fa;
+  margin-bottom: .2rem;
+}
+.es-microchart-tooltip .tt-ext-row {
+  color: #e2e8f0;
+  font-size: .75rem;
+  padding: .1rem 0;
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  flex-wrap: wrap;
+}
+.es-microchart-tooltip .tt-ext-date { color: #94a3b8; }
+.es-microchart-tooltip .tt-ext-code { color: #a5b4fc; font-weight: 600; }
+.es-microchart-tooltip .tt-ext-fees { color: #94a3b8; font-size: .72rem; }
+.es-microchart-tooltip .tt-fee-items {
+  margin-left: .75rem;
+  border-left: 2px solid #334155;
+  padding-left: .5rem;
+  margin-top: .15rem;
+  margin-bottom: .25rem;
+}
+.es-microchart-tooltip .tt-fee-item {
+  font-size: .72rem;
+  color: #cbd5e1;
+  padding: .05rem 0;
+}
+.es-microchart-tooltip .tt-more {
+  color: #64748b;
+  font-style: italic;
+  font-size: .72rem;
+}
+.es-microchart-tooltip .tt-no-ext {
+  color: #64748b;
+  font-size: .72rem;
+  font-style: italic;
+  margin-top: .2rem;
+}
+.es-microchart-tooltip .tt-click-hint {
+  color: #60a5fa;
+  font-size: .7rem;
+  margin-top: .3rem;
+  text-align: right;
+}
+.es-microchart-tooltip .es-status-badge {
+  display: inline-block;
+  font-size: .65rem;
+  font-weight: 700;
+  padding: .05rem .3rem;
+  border-radius: 3px;
+  line-height: 1.3;
+}
+.es-microchart-tooltip .es-status-small { background: #166534; color: #bbf7d0; }
+.es-microchart-tooltip .es-status-micro { background: #1e40af; color: #bfdbfe; }
+.es-microchart-tooltip .es-status-large { background: #991b1b; color: #fecaca; }
+
+/* Extraction status indicator */
+#es-extraction-status {
+  display: none;
+  font-size: .8rem;
+  color: #2563eb;
+  margin-top: .25rem;
+}
+
 @media (max-width: 900px) {
   .sec-stats-grid { grid-template-columns: repeat(2, 1fr); }
 }

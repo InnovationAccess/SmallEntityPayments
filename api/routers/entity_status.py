@@ -75,6 +75,10 @@ class EntityProsecutionRequest(BaseModel):
     application_numbers: List[str]
 
 
+class ExtractionDataRequest(BaseModel):
+    application_numbers: List[str]
+
+
 # ── Prosecution Payment Analysis Constants ────────────────────────
 
 # Status-change event codes → new entity status
@@ -1801,6 +1805,83 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "decl_micr": pg_decl_micr,
         },
         "results": results,
+    }
+
+
+# ── Invoice Extraction Data (from PDF pipeline) ──────────────────
+
+@router.post("/extraction-data")
+def get_extraction_data(req: ExtractionDataRequest) -> Dict[str, Any]:
+    """Return extracted invoice data keyed by application_number.
+
+    Used by the frontend to show rich tooltips on payment icons
+    with actual fee details from extracted PDFs.
+    """
+    if not req.application_numbers:
+        return {"extractions": {}, "stats": {"apps_with_extractions": 0, "total_extractions": 0}}
+
+    client = bigquery.Client(location="us-west1")
+
+    # Fetch all extracted records for these applications
+    query = """
+    SELECT
+      application_number,
+      mail_date,
+      doc_code,
+      doc_description,
+      entity_status,
+      fees_json,
+      total_amount,
+      gcs_path,
+      extraction_method,
+      extraction_status
+    FROM `uspto-data-app.uspto_data.invoice_extractions`
+    WHERE application_number IN UNNEST(@apps)
+      AND extraction_status = 'extracted'
+    ORDER BY application_number, mail_date DESC
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("apps", "STRING", req.application_numbers)
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+
+    # Group by application_number
+    extractions: Dict[str, list] = {}
+    for r in rows:
+        app = r.application_number
+        if app not in extractions:
+            extractions[app] = []
+
+        # Parse fees_json safely
+        fees = []
+        if r.fees_json:
+            try:
+                fees = json.loads(r.fees_json)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        extractions[app].append({
+            "mail_date": r.mail_date,
+            "doc_code": r.doc_code or "",
+            "description": r.doc_description or "",
+            "entity_status": r.entity_status,
+            "total_amount": float(r.total_amount) if r.total_amount else None,
+            "fees": fees,
+            "gcs_path": r.gcs_path or "",
+            "extraction_method": r.extraction_method or "",
+        })
+
+    apps_with = len(extractions)
+    total_docs = sum(len(v) for v in extractions.values())
+
+    return {
+        "extractions": extractions,
+        "stats": {
+            "apps_with_extractions": apps_with,
+            "total_extractions": total_docs,
+        },
     }
 
 

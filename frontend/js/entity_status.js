@@ -1122,6 +1122,7 @@ function renderApplicantPortfolio(data) {
           </div>
         </div>
         <p class="text-muted" id="es-pros-pay-status" style="margin:0.25rem 0 0;font-size:0.8rem"></p>
+        <p id="es-extraction-status" style="display:none;margin:0.15rem 0 0"></p>
       </div>
       <div id="es-pros-summary-wrap" style="display:none;margin-top:1rem"></div>
       <div id="es-pros-detail-wrap" style="display:none;margin-top:1rem"></div>
@@ -1560,6 +1561,9 @@ async function fetchProsecutionPaymentsAuto(entityName, allApps) {
     // Store globally for sparkline injection
     window._prosecutionData = merged;
 
+    // Fetch extraction data in parallel (non-blocking, enriches tooltips)
+    fetchExtractionData(allApps);
+
     // Populate KPIs
     const k = merged.kpis || {};
     const setKpi = (id, val) => {
@@ -1941,6 +1945,11 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
             _prosCode: p.c,
             _prosDesc: p.desc,
             _prosStatus: p.status,
+            _prosApp: app,
+            _prosPaid: p.paid,
+            _prosLarge: p.large,
+            _prosDelta: p.delta,
+            _prosCat: p.cat,
           });
         }
 
@@ -2115,7 +2124,10 @@ async function fetchAndRenderMicroCharts(patentNumbers, filterSpec) {
             : ev._prosStatus === 'MICRO' ? STATUS_COLORS.micro
             : STATUS_COLORS.large;
           marker = createIconEl(svgDollar, prosColor, pct, ev);
-          marker.title = `${ev._prosCode || ''} (${ev._prosStatus || ''}) \u2014 ${ev.d}${ev._prosDesc ? ' \u2014 ' + ev._prosDesc : ''}`;
+          marker.title = '';  // disable native tooltip — we use custom rich tooltip
+          marker.style.cursor = 'pointer';
+          _attachProsPayTooltip(marker, ev);
+          _attachProsPayClick(marker, ev);
         } else if (cat === 'litigation') {
           marker = createIconEl(svgStar, '#d4a017', pct, ev);
           marker.title = `Litigation filed \u2014 ${ev.d}${ev._case ? ' \u2014 ' + ev._case.case_no : ''}`;
@@ -2159,6 +2171,166 @@ function clearMicroCharts() {
   }
   const legend = document.getElementById('es-microchart-legend');
   if (legend) legend.classList.add('hidden');
+}
+
+// ── Rich Tooltip + Click for Prosecution Payment Icons ──────────
+
+/** Active tooltip element (shared singleton). */
+let _activeTooltip = null;
+
+/** Attach rich HTML tooltip to a PROS_PAY marker. */
+function _attachProsPayTooltip(marker, ev) {
+  marker.addEventListener('mouseenter', (e) => {
+    _removeActiveTooltip();
+
+    const tip = document.createElement('div');
+    tip.className = 'es-microchart-tooltip';
+
+    // Header: event code + status + date
+    const statusBadge = ev._prosStatus
+      ? `<span class="es-status-badge es-status-${(ev._prosStatus || '').toLowerCase()}">${ev._prosStatus}</span>`
+      : '';
+    let html = `<div class="tt-header">${escHtml(ev._prosCode || '')} ${statusBadge} — ${ev.d}</div>`;
+
+    // Algorithm estimate
+    if (ev._prosDesc) {
+      html += `<div class="tt-desc">${escHtml(ev._prosDesc)}</div>`;
+    }
+    if (ev._prosPaid != null) {
+      html += `<div class="tt-algo">`;
+      html += `Paid: <strong>$${Math.round(ev._prosPaid).toLocaleString()}</strong>`;
+      if (ev._prosLarge != null) html += ` · Large rate: $${Math.round(ev._prosLarge).toLocaleString()}`;
+      if (ev._prosDelta != null && ev._prosDelta > 0) html += ` · <span class="tt-delta">Δ $${Math.round(ev._prosDelta).toLocaleString()}</span>`;
+      html += `</div>`;
+    }
+
+    // Extraction data (if available for this application)
+    const appExtractions = window._extractionData && ev._prosApp
+      ? window._extractionData[ev._prosApp]
+      : null;
+
+    if (appExtractions && appExtractions.length > 0) {
+      html += `<div class="tt-divider"></div>`;
+      html += `<div class="tt-ext-header">📄 ${appExtractions.length} invoice${appExtractions.length > 1 ? 's' : ''} extracted</div>`;
+
+      // Show up to 3 most relevant invoices (closest to event date first)
+      const sorted = [...appExtractions].sort((a, b) => {
+        const da = Math.abs(new Date(a.mail_date) - new Date(ev.d));
+        const db = Math.abs(new Date(b.mail_date) - new Date(ev.d));
+        return da - db;
+      });
+      const shown = sorted.slice(0, 3);
+
+      for (const ext of shown) {
+        const amt = ext.total_amount != null ? `$${Number(ext.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
+        const feeCount = (ext.fees || []).length;
+        const extStatus = ext.entity_status
+          ? `<span class="es-status-badge es-status-${ext.entity_status.toLowerCase()}">${ext.entity_status}</span>`
+          : '';
+        html += `<div class="tt-ext-row">`;
+        html += `<span class="tt-ext-date">${ext.mail_date || '?'}</span> `;
+        html += `<span class="tt-ext-code">${escHtml(ext.doc_code)}</span> `;
+        html += `${extStatus} `;
+        html += `<strong>${amt}</strong>`;
+        if (feeCount > 0) html += ` <span class="tt-ext-fees">(${feeCount} fees)</span>`;
+        html += `</div>`;
+
+        // Show individual fee items for the closest invoice
+        if (ext === shown[0] && ext.fees && ext.fees.length > 0) {
+          html += `<div class="tt-fee-items">`;
+          for (const fee of ext.fees.slice(0, 6)) {
+            const feeAmt = fee.amount != null ? `$${Number(fee.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '';
+            html += `<div class="tt-fee-item">${escHtml(fee.description || fee.fee_code || '?')} — ${feeAmt}</div>`;
+          }
+          if (ext.fees.length > 6) {
+            html += `<div class="tt-fee-item tt-more">+ ${ext.fees.length - 6} more</div>`;
+          }
+          html += `</div>`;
+        }
+      }
+      if (appExtractions.length > 3) {
+        html += `<div class="tt-more">+ ${appExtractions.length - 3} more invoices</div>`;
+      }
+    } else if (window._extractionData !== undefined) {
+      // Extraction data loaded but nothing for this app
+      html += `<div class="tt-no-ext">No invoice PDFs extracted yet</div>`;
+    }
+
+    html += `<div class="tt-click-hint">Click to view invoices</div>`;
+    tip.innerHTML = html;
+
+    // Position tooltip near the marker
+    document.body.appendChild(tip);
+    const rect = marker.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    let left = rect.left + window.scrollX - tipRect.width / 2 + rect.width / 2;
+    let top = rect.top + window.scrollY - tipRect.height - 8;
+    // Keep within viewport
+    if (left < 4) left = 4;
+    if (left + tipRect.width > window.innerWidth - 4) left = window.innerWidth - tipRect.width - 4;
+    if (top < 4) top = rect.bottom + window.scrollY + 8; // flip below if no room above
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+
+    _activeTooltip = tip;
+  });
+
+  marker.addEventListener('mouseleave', () => {
+    // Small delay so user can move to tooltip
+    setTimeout(() => {
+      if (_activeTooltip && !_activeTooltip.matches(':hover')) {
+        _removeActiveTooltip();
+      }
+    }, 200);
+  });
+}
+
+function _removeActiveTooltip() {
+  if (_activeTooltip) {
+    _activeTooltip.remove();
+    _activeTooltip = null;
+  }
+}
+
+// Remove tooltip when mouse leaves it
+document.addEventListener('mouseover', (e) => {
+  if (_activeTooltip && !_activeTooltip.contains(e.target) &&
+      !e.target.closest('.es-microchart-icon')) {
+    _removeActiveTooltip();
+  }
+});
+
+/** Attach click handler to open invoice popup for a PROS_PAY marker. */
+function _attachProsPayClick(marker, ev) {
+  marker.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _removeActiveTooltip();
+    if (ev._prosApp) {
+      showInvoicePopup(ev._prosApp);
+    }
+  });
+}
+
+/** Fetch extraction data for all applications and store globally. */
+async function fetchExtractionData(allApps) {
+  if (!allApps || allApps.length === 0) return;
+  try {
+    const resp = await apiPost('/api/entity-status/extraction-data', {
+      application_numbers: allApps,
+    });
+    window._extractionData = resp.extractions || {};
+    const s = resp.stats || {};
+    if (s.total_extractions > 0) {
+      const statusEl = document.getElementById('es-extraction-status');
+      if (statusEl) {
+        statusEl.textContent = `📄 ${s.total_extractions.toLocaleString()} invoices extracted across ${s.apps_with_extractions.toLocaleString()} applications`;
+        statusEl.style.display = '';
+      }
+    }
+  } catch (err) {
+    // Non-critical — tooltips just won't show extraction data
+    window._extractionData = {};
+  }
 }
 
 /** Show the icon + line color legend above the table. */
