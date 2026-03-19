@@ -120,5 +120,9 @@ class Settings:
     def prosecution_payment_cache_table(self) -> str:
         return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.prosecution_payment_cache"
 
+    @property
+    def entity_prosecution_cache_table(self) -> str:
+        return f"{self.GCP_PROJECT_ID}.{self.BIGQUERY_DATASET}.entity_prosecution_cache"
+
 
 settings = Settings()

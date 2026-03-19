@@ -70,6 +70,11 @@ class ProsecutionTimelinesRequest(BaseModel):
     application_numbers: List[str]
 
 
+class EntityProsecutionRequest(BaseModel):
+    applicant_name: str
+    application_numbers: List[str]
+
+
 # ── Prosecution Payment Analysis Constants ────────────────────────
 
 # Status-change event codes → new entity status
@@ -928,6 +933,274 @@ def _save_prosecution_cache(results: Dict[str, dict]) -> None:
         errors = client.insert_rows_json(table_ref, batch)
         if errors:
             log.error("Cache insert errors: %s", errors[:3])
+
+
+@router.post("/entity-prosecution-kpis")
+def get_entity_prosecution_kpis(req: EntityProsecutionRequest) -> Dict[str, Any]:
+    """Entity-level prosecution KPIs with server-side batching.
+
+    Checks entity_prosecution_cache first.  On cache miss, batches all
+    applications through per-app cache / fresh analysis, aggregates KPIs,
+    and saves the entity-level result for instant repeat loads.
+    """
+    _dollar_kpi_zeros = {
+        "total_paid": 0, "total_large_rate": 0, "total_underpayment": 0,
+        "reduced_paid": 0, "reduced_large_rate": 0, "reduced_underpayment": 0,
+        "total_paid_10y": 0, "total_large_rate_10y": 0, "total_underpayment_10y": 0,
+        "reduced_paid_10y": 0, "reduced_large_rate_10y": 0, "reduced_underpayment_10y": 0,
+    }
+    empty = {"timelines": {}, "date_range": None,
+             "payments_detail": [], "summary": {},
+             "kpis": {"small": 0, "micro": 0, "large": 0, "total": 0,
+                      "apps_with_findings": 0,
+                      "small_10y": 0, "micro_10y": 0, "large_10y": 0,
+                      "total_10y": 0, "apps_with_findings_10y": 0,
+                      **_dollar_kpi_zeros},
+             "cache_stats": {"from_cache": 0, "freshly_analyzed": 0}}
+    if not req.application_numbers:
+        return empty
+
+    entity_name = req.applicant_name.strip()
+    an_list = req.application_numbers
+    app_count = len(an_list)
+
+    # ── Step 1: Check entity-level cache ──────────────────────────
+    try:
+        ecache_sql = f"""
+        SELECT kpis_json, payments_detail_json, summary_json, timelines_json
+        FROM `{settings.entity_prosecution_cache_table}`
+        WHERE entity_name = @entity_name
+          AND app_count = @app_count
+          AND cache_version = {_CACHE_VERSION}
+        LIMIT 1
+        """
+        ecache_params = [
+            bigquery.ScalarQueryParameter("entity_name", "STRING", entity_name),
+            bigquery.ScalarQueryParameter("app_count", "INT64", app_count),
+        ]
+        ecache_rows = bq_service.run_query(ecache_sql, ecache_params)
+        if ecache_rows:
+            row = ecache_rows[0]
+            log.info("Entity prosecution cache HIT for %s (%d apps)",
+                     entity_name, app_count)
+            result = {
+                "kpis": json.loads(row["kpis_json"]) if row.get("kpis_json") else empty["kpis"],
+                "payments_detail": json.loads(row["payments_detail_json"]) if row.get("payments_detail_json") else [],
+                "summary": json.loads(row["summary_json"]) if row.get("summary_json") else {},
+                "timelines": json.loads(row["timelines_json"]) if row.get("timelines_json") else {},
+                "date_range": None,
+                "cache_stats": {"from_cache": app_count, "freshly_analyzed": 0},
+            }
+            # Rebuild date_range from timelines
+            g_min, g_max = None, None
+            for _an, tl in result["timelines"].items():
+                for seg in tl.get("segments", []):
+                    for k in ("start", "end"):
+                        v = seg.get(k)
+                        if v:
+                            if g_min is None or v < g_min: g_min = v
+                            if g_max is None or v > g_max: g_max = v
+                for pay in tl.get("payments", []):
+                    v = pay.get("d")
+                    if v:
+                        if g_min is None or v < g_min: g_min = v
+                        if g_max is None or v > g_max: g_max = v
+            if g_min and g_max:
+                result["date_range"] = {"min": g_min, "max": g_max}
+            return result
+    except Exception as e:
+        log.warning("Entity cache lookup failed: %s", e)
+
+    # ── Step 2: Cache miss — batch through per-app analysis ───────
+    log.info("Entity prosecution cache MISS for %s (%d apps) — analyzing",
+             entity_name, app_count)
+
+    BATCH = 1000
+    all_timelines: Dict[str, dict] = {}
+    total_from_cache = 0
+    total_fresh = 0
+
+    for i in range(0, len(an_list), BATCH):
+        batch = an_list[i:i + BATCH]
+
+        # Check per-app cache
+        cache_params = [bigquery.ArrayQueryParameter("an_list", "STRING", batch)]
+        cache_sql = f"""
+        SELECT application_number, segments, payments,
+               small_count, micro_count, large_count, filing_date
+        FROM `{settings.prosecution_payment_cache_table}`
+        WHERE application_number IN UNNEST(@an_list)
+          AND cache_version = {_CACHE_VERSION}
+        """
+        cache_rows = bq_service.run_query(cache_sql, cache_params)
+
+        cached: Dict[str, dict] = {}
+        for r in cache_rows:
+            an = r["application_number"]
+            cached[an] = {
+                "segments": json.loads(r["segments"]) if r.get("segments") else [],
+                "payments": json.loads(r["payments"]) if r.get("payments") else [],
+                "small_count": r.get("small_count", 0),
+                "micro_count": r.get("micro_count", 0),
+                "large_count": r.get("large_count", 0),
+                "filing_date": r.get("filing_date"),
+            }
+        total_from_cache += len(cached)
+
+        uncached = [an for an in batch if an not in cached]
+        fresh: Dict[str, dict] = {}
+        if uncached:
+            fresh = _analyze_prosecution_apps(uncached)
+            total_fresh += len(fresh)
+            _save_prosecution_cache(fresh)
+
+        # Merge into all_timelines
+        for an in batch:
+            if an in fresh:
+                all_timelines[an] = fresh[an]
+            elif an in cached:
+                all_timelines[an] = cached[an]
+
+    # ── Step 3: Aggregate KPIs from all timelines ─────────────────
+    timelines_out: Dict[str, dict] = {}
+    payments_detail = []
+    summary: Dict[str, Dict[str, int]] = {}
+    kpi_small = kpi_micro = kpi_large = 0
+    kpi_small_10y = kpi_micro_10y = kpi_large_10y = 0
+    apps_with_findings: set = set()
+    apps_with_findings_10y: set = set()
+    kpi_total_paid = kpi_total_large = kpi_total_delta = 0
+    kpi_reduced_paid = kpi_reduced_large = kpi_reduced_delta = 0
+    kpi_total_paid_10y = kpi_total_large_10y = kpi_total_delta_10y = 0
+    kpi_reduced_paid_10y = kpi_reduced_large_10y = kpi_reduced_delta_10y = 0
+    global_min = global_max = None
+    ten_yr_cutoff = _fmt_date(_date.today().replace(year=_date.today().year - 10))
+
+    def _upd(d_str):
+        nonlocal global_min, global_max
+        if not d_str: return
+        if global_min is None or d_str < global_min: global_min = d_str
+        if global_max is None or d_str > global_max: global_max = d_str
+
+    for an, tl in all_timelines.items():
+        timelines_out[an] = {"segments": tl["segments"], "payments": tl["payments"]}
+
+        for seg in tl["segments"]:
+            _upd(seg.get("start"))
+            _upd(seg.get("end"))
+
+        for pay in tl["payments"]:
+            _upd(pay.get("d"))
+            ps = pay.get("status", "LARGE")
+            pp = pay.get("paid", 0)
+            pl = pay.get("large", 0)
+            pd = pay.get("delta", 0)
+
+            if ps == "SMALL":
+                kpi_small += 1; apps_with_findings.add(an)
+            elif ps == "MICRO":
+                kpi_micro += 1; apps_with_findings.add(an)
+            else:
+                kpi_large += 1
+
+            kpi_total_paid += pp; kpi_total_large += pl; kpi_total_delta += pd
+            if ps in ("SMALL", "MICRO"):
+                kpi_reduced_paid += pp; kpi_reduced_large += pl; kpi_reduced_delta += pd
+
+            if pay.get("d") and pay["d"] >= ten_yr_cutoff:
+                if ps == "SMALL":
+                    kpi_small_10y += 1; apps_with_findings_10y.add(an)
+                elif ps == "MICRO":
+                    kpi_micro_10y += 1; apps_with_findings_10y.add(an)
+                else:
+                    kpi_large_10y += 1
+                kpi_total_paid_10y += pp; kpi_total_large_10y += pl; kpi_total_delta_10y += pd
+                if ps in ("SMALL", "MICRO"):
+                    kpi_reduced_paid_10y += pp; kpi_reduced_large_10y += pl; kpi_reduced_delta_10y += pd
+
+            yr = pay["d"][:4] if pay.get("d") else "Unknown"
+            if yr not in summary: summary[yr] = {}
+            summary[yr][pay["c"]] = summary[yr].get(pay["c"], 0) + 1
+
+            if ps in ("SMALL", "MICRO"):
+                origin_code = origin_date = None
+                for seg in tl["segments"]:
+                    s_start = seg.get("start")
+                    s_end = seg.get("end")
+                    if s_start and pay["d"] >= s_start:
+                        if s_end is None or pay["d"] < s_end:
+                            origin_code = seg.get("trigger")
+                            origin_date = s_start
+                            break
+                payments_detail.append({
+                    "application_number": an,
+                    "event_date": pay["d"],
+                    "event_code": pay["c"],
+                    "event_description": pay.get("desc", ""),
+                    "claimed_status": ps,
+                    "fee_category": pay.get("cat"),
+                    "amount_paid": pp,
+                    "large_rate": pl,
+                    "underpayment": pd,
+                    "origin_code": origin_code,
+                    "origin_date": origin_date,
+                })
+
+    kpis = {
+        "small": kpi_small, "micro": kpi_micro, "large": kpi_large,
+        "total": kpi_small + kpi_micro + kpi_large,
+        "apps_with_findings": len(apps_with_findings),
+        "small_10y": kpi_small_10y, "micro_10y": kpi_micro_10y, "large_10y": kpi_large_10y,
+        "total_10y": kpi_small_10y + kpi_micro_10y + kpi_large_10y,
+        "apps_with_findings_10y": len(apps_with_findings_10y),
+        "total_paid": kpi_total_paid, "total_large_rate": kpi_total_large,
+        "total_underpayment": kpi_total_delta,
+        "reduced_paid": kpi_reduced_paid, "reduced_large_rate": kpi_reduced_large,
+        "reduced_underpayment": kpi_reduced_delta,
+        "total_paid_10y": kpi_total_paid_10y, "total_large_rate_10y": kpi_total_large_10y,
+        "total_underpayment_10y": kpi_total_delta_10y,
+        "reduced_paid_10y": kpi_reduced_paid_10y, "reduced_large_rate_10y": kpi_reduced_large_10y,
+        "reduced_underpayment_10y": kpi_reduced_delta_10y,
+    }
+
+    # ── Step 4: Save entity-level cache ───────────────────────────
+    try:
+        client = bq_service.client
+        del_sql = f"""
+        DELETE FROM `{settings.entity_prosecution_cache_table}`
+        WHERE entity_name = @entity_name
+        """
+        del_params = [bigquery.ScalarQueryParameter("entity_name", "STRING", entity_name)]
+        bq_service.run_query(del_sql, del_params)
+
+        cache_row = {
+            "entity_name": entity_name,
+            "app_count": app_count,
+            "cache_version": _CACHE_VERSION,
+            "analyzed_at": _datetime.utcnow().isoformat(),
+            "kpis_json": json.dumps(kpis),
+            "payments_detail_json": json.dumps(payments_detail),
+            "summary_json": json.dumps(summary),
+            "timelines_json": json.dumps(timelines_out),
+        }
+        errors = client.insert_rows_json(
+            settings.entity_prosecution_cache_table, [cache_row])
+        if errors:
+            log.error("Entity cache insert errors: %s", errors[:3])
+        else:
+            log.info("Entity prosecution cache saved for %s (%d apps)",
+                     entity_name, app_count)
+    except Exception as e:
+        log.warning("Entity cache save failed: %s", e)
+
+    return {
+        "timelines": timelines_out,
+        "date_range": {"min": global_min, "max": global_max} if global_min and global_max else None,
+        "payments_detail": payments_detail,
+        "summary": summary,
+        "kpis": kpis,
+        "cache_stats": {"from_cache": total_from_cache, "freshly_analyzed": total_fresh},
+    }
 
 
 @router.post("/by-applicant")

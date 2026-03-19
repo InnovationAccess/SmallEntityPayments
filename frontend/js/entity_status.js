@@ -766,7 +766,10 @@ function renderApplicantPortfolio(data) {
       <div class="card">
         <h4 class="card-title" style="font-size:1rem">Prosecution Payment Analysis</h4>
         <p class="text-muted" style="margin:0 0 0.5rem">Identifies all fee payments made during prosecution and classifies them by the entity status at the time of payment</p>
-        <button class="btn btn-primary" id="es-pros-pay-btn" style="margin-bottom:0.5rem">Analyze Prosecution Payments</button>
+        <div id="es-pros-pay-progress" style="margin-bottom:0.5rem;display:none">
+          <span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid #ccc;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px"></span>
+          <span id="es-pros-pay-status" class="text-muted" style="font-size:0.85rem">Analyzing prosecution payments...</span>
+        </div>
         <div id="es-pros-pay-kpis" style="display:none">
           <div class="cite-summary-grid">
             <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution: Small Rate Payments">
@@ -1053,10 +1056,10 @@ function renderApplicantPortfolio(data) {
     fetchLitigationData(grantedPatents);
   }
 
-  // Wire prosecution payment analysis button
-  const prosPayBtn = document.getElementById('es-pros-pay-btn');
-  if (prosPayBtn) {
-    prosPayBtn.addEventListener('click', () => fetchProsecutionPayments());
+  // Auto-trigger prosecution payment analysis (no button needed)
+  const allApps = data.results.map(r => r.application_number).filter(Boolean);
+  if (allApps.length > 0) {
+    fetchProsecutionPaymentsAuto(data.applicant_name || '', allApps);
   }
 }
 
@@ -1275,165 +1278,64 @@ function hideLitigationTable() {
 // ── Prosecution Payment Analysis ─────────────────────────────────
 
 /**
- * Fetch prosecution payment data for all applications in the table.
- * Builds status segments + payment events, populates KPIs and tables.
+ * Auto-trigger prosecution payment analysis — single API call to entity-level endpoint.
+ * Server does all batching and caching internally.
  */
-async function fetchProsecutionPayments() {
+async function fetchProsecutionPaymentsAuto(entityName, allApps) {
   const tbl = document.getElementById('es-app-table');
   const statusEl = document.getElementById('es-pros-pay-status');
+  const progressEl = document.getElementById('es-pros-pay-progress');
   const kpisEl = document.getElementById('es-pros-pay-kpis');
-  const btn = document.getElementById('es-pros-pay-btn');
-  if (!tbl) return;
+  if (!tbl || allApps.length === 0) return;
 
-  // Collect all application numbers from table rows
-  const allApps = [];
-  tbl.querySelectorAll('tbody tr').forEach(row => {
-    const app = row.dataset.app;
-    if (app) allApps.push(app);
-  });
-
-  if (allApps.length === 0) {
-    if (statusEl) statusEl.textContent = 'No applications found in table.';
-    return;
-  }
-
-  // Disable button during fetch
-  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+  // Show progress
+  if (progressEl) progressEl.style.display = '';
   if (statusEl) statusEl.textContent = `Analyzing ${allApps.length.toLocaleString()} applications...`;
 
   try {
-    // Batch into groups of 1000
-    const BATCH = 1000;
-    const batches = [];
-    for (let i = 0; i < allApps.length; i += BATCH) {
-      batches.push(allApps.slice(i, i + BATCH));
-    }
-
-    // Fetch all batches (sequential to avoid overloading)
-    const merged = {
-      timelines: {},
-      payments_detail: [],
-      summary: {},
-      kpis: { small: 0, micro: 0, large: 0, total: 0, apps_with_findings: 0,
-              small_10y: 0, micro_10y: 0, large_10y: 0, total_10y: 0, apps_with_findings_10y: 0,
-              reduced_paid: 0, reduced_large_rate: 0, reduced_underpayment: 0,
-              reduced_paid_10y: 0, reduced_large_rate_10y: 0, reduced_underpayment_10y: 0 },
-      date_range: null,
-      cache_stats: { from_cache: 0, freshly_analyzed: 0 },
-    };
-
-    for (let i = 0; i < batches.length; i++) {
-      if (statusEl) statusEl.textContent = `Analyzing batch ${i + 1} of ${batches.length}...`;
-      const resp = await apiPost('/api/entity-status/prosecution-timelines', {
-        application_numbers: batches[i],
-      });
-
-      // Merge timelines
-      Object.assign(merged.timelines, resp.timelines || {});
-
-      // Merge payments_detail
-      if (resp.payments_detail) merged.payments_detail.push(...resp.payments_detail);
-
-      // Merge summary (year → code → count)
-      for (const [yr, codes] of Object.entries(resp.summary || {})) {
-        if (!merged.summary[yr]) merged.summary[yr] = {};
-        for (const [code, cnt] of Object.entries(codes)) {
-          merged.summary[yr][code] = (merged.summary[yr][code] || 0) + cnt;
-        }
-      }
-
-      // Merge KPIs
-      const k = resp.kpis || {};
-      merged.kpis.small += k.small || 0;
-      merged.kpis.micro += k.micro || 0;
-      merged.kpis.large += k.large || 0;
-      merged.kpis.total += k.total || 0;
-      merged.kpis.small_10y += k.small_10y || 0;
-      merged.kpis.micro_10y += k.micro_10y || 0;
-      merged.kpis.large_10y += k.large_10y || 0;
-      merged.kpis.total_10y += k.total_10y || 0;
-      // Dollar KPIs (reduced-rate only — Small + Micro)
-      merged.kpis.reduced_paid += k.reduced_paid || 0;
-      merged.kpis.reduced_large_rate += k.reduced_large_rate || 0;
-      merged.kpis.reduced_underpayment += k.reduced_underpayment || 0;
-      merged.kpis.reduced_paid_10y += k.reduced_paid_10y || 0;
-      merged.kpis.reduced_large_rate_10y += k.reduced_large_rate_10y || 0;
-      merged.kpis.reduced_underpayment_10y += k.reduced_underpayment_10y || 0;
-      // apps_with_findings must be re-counted from merged timelines
-      // (app might appear in multiple batches — unlikely but safe)
-
-      // Merge date_range
-      if (resp.date_range) {
-        if (!merged.date_range) {
-          merged.date_range = { ...resp.date_range };
-        } else {
-          if (resp.date_range.min < merged.date_range.min) merged.date_range.min = resp.date_range.min;
-          if (resp.date_range.max > merged.date_range.max) merged.date_range.max = resp.date_range.max;
-        }
-      }
-
-      // Merge cache stats
-      const cs = resp.cache_stats || {};
-      merged.cache_stats.from_cache += cs.from_cache || 0;
-      merged.cache_stats.freshly_analyzed += cs.freshly_analyzed || 0;
-    }
-
-    // Recount apps_with_findings from merged data
-    const appsWithFindings = new Set();
-    const appsWithFindings10y = new Set();
-    const tenYrCutoff = new Date();
-    tenYrCutoff.setFullYear(tenYrCutoff.getFullYear() - 10);
-    const tenYrStr = tenYrCutoff.toISOString().slice(0, 10);
-    for (const [an, tl] of Object.entries(merged.timelines)) {
-      if (tl.payments) {
-        for (const p of tl.payments) {
-          if (p.status === 'SMALL' || p.status === 'MICRO') {
-            appsWithFindings.add(an);
-            if (p.d && p.d >= tenYrStr) appsWithFindings10y.add(an);
-          }
-        }
-      }
-    }
-    merged.kpis.apps_with_findings = appsWithFindings.size;
-    merged.kpis.apps_with_findings_10y = appsWithFindings10y.size;
+    const merged = await apiPost('/api/entity-status/entity-prosecution-kpis', {
+      applicant_name: entityName,
+      application_numbers: allApps,
+    });
 
     // Store globally for sparkline injection
     window._prosecutionData = merged;
 
     // Populate KPIs
+    const k = merged.kpis || {};
     const setKpi = (id, val) => {
       const el = document.getElementById(id);
-      if (el) el.textContent = val.toLocaleString();
+      if (el) el.textContent = (val || 0).toLocaleString();
     };
-    setKpi('es-pros-pay-small', merged.kpis.small);
-    setKpi('es-pros-pay-micro', merged.kpis.micro);
-    setKpi('es-pros-pay-large', merged.kpis.large);
-    setKpi('es-pros-pay-total', merged.kpis.total);
-    setKpi('es-pros-pay-apps', merged.kpis.apps_with_findings);
-    setKpi('es-pros-pay-small-10y', merged.kpis.small_10y || 0);
-    setKpi('es-pros-pay-micro-10y', merged.kpis.micro_10y || 0);
-    setKpi('es-pros-pay-large-10y', merged.kpis.large_10y || 0);
-    setKpi('es-pros-pay-total-10y', merged.kpis.total_10y || 0);
-    setKpi('es-pros-pay-apps-10y', merged.kpis.apps_with_findings_10y || 0);
+    setKpi('es-pros-pay-small', k.small);
+    setKpi('es-pros-pay-micro', k.micro);
+    setKpi('es-pros-pay-large', k.large);
+    setKpi('es-pros-pay-total', k.total);
+    setKpi('es-pros-pay-apps', k.apps_with_findings);
+    setKpi('es-pros-pay-small-10y', k.small_10y);
+    setKpi('es-pros-pay-micro-10y', k.micro_10y);
+    setKpi('es-pros-pay-large-10y', k.large_10y);
+    setKpi('es-pros-pay-total-10y', k.total_10y);
+    setKpi('es-pros-pay-apps-10y', k.apps_with_findings_10y);
 
     // Dollar KPIs
     const setDollar = (id, val) => {
       const el = document.getElementById(id);
-      if (el) el.textContent = '$' + Math.round(val).toLocaleString();
+      if (el) el.textContent = '$' + Math.round(val || 0).toLocaleString();
     };
-    setDollar('es-pros-pay-dollars-paid', merged.kpis.reduced_paid);
-    setDollar('es-pros-pay-dollars-large', merged.kpis.reduced_large_rate);
-    setDollar('es-pros-pay-dollars-delta', merged.kpis.reduced_underpayment);
-    setDollar('es-pros-pay-dollars-paid-10y', merged.kpis.reduced_paid_10y);
-    setDollar('es-pros-pay-dollars-large-10y', merged.kpis.reduced_large_rate_10y);
-    setDollar('es-pros-pay-dollars-delta-10y', merged.kpis.reduced_underpayment_10y);
+    setDollar('es-pros-pay-dollars-paid', k.reduced_paid);
+    setDollar('es-pros-pay-dollars-large', k.reduced_large_rate);
+    setDollar('es-pros-pay-dollars-delta', k.reduced_underpayment);
+    setDollar('es-pros-pay-dollars-paid-10y', k.reduced_paid_10y);
+    setDollar('es-pros-pay-dollars-large-10y', k.reduced_large_rate_10y);
+    setDollar('es-pros-pay-dollars-delta-10y', k.reduced_underpayment_10y);
 
     if (kpisEl) kpisEl.style.display = '';
 
     // Set data-prospay on table rows (comma-separated statuses)
     tbl.querySelectorAll('tbody tr').forEach(row => {
       const app = row.dataset.app;
-      if (!app || !merged.timelines[app]) return;
+      if (!app || !merged.timelines || !merged.timelines[app]) return;
       const statuses = new Set();
       for (const p of (merged.timelines[app].payments || [])) {
         statuses.add(p.status);
@@ -1445,9 +1347,12 @@ async function fetchProsecutionPayments() {
     const prosPaySection = document.getElementById('es-pros-payments');
     if (prosPaySection) {
       prosPaySection.querySelectorAll('.kpi-clickable').forEach(el => {
-        el.addEventListener('click', () => {
-          filterPatentTable(el.dataset.filter, el.dataset.label, el);
-        });
+        if (!el._prosWired) {
+          el._prosWired = true;
+          el.addEventListener('click', () => {
+            filterPatentTable(el.dataset.filter, el.dataset.label, el);
+          });
+        }
       });
     }
 
@@ -1466,15 +1371,23 @@ async function fetchProsecutionPayments() {
       fetchAndRenderMicroCharts(visiblePatents);
     }
 
-    const cacheMsg = merged.cache_stats.from_cache > 0
-      ? ` (${merged.cache_stats.from_cache.toLocaleString()} from cache, ${merged.cache_stats.freshly_analyzed.toLocaleString()} freshly analyzed)`
+    const cs = merged.cache_stats || {};
+    const cacheMsg = cs.from_cache > 0
+      ? ` (${cs.from_cache.toLocaleString()} cached, ${cs.freshly_analyzed.toLocaleString()} fresh)`
       : '';
-    if (statusEl) statusEl.textContent = `Analysis complete. ${merged.kpis.total.toLocaleString()} payment events found across ${allApps.length.toLocaleString()} applications${cacheMsg}.`;
-    if (btn) { btn.textContent = 'Re-Analyze'; btn.disabled = false; }
+    if (statusEl) statusEl.textContent = `${(k.total || 0).toLocaleString()} payment events across ${allApps.length.toLocaleString()} applications${cacheMsg}`;
+    if (progressEl) {
+      // Hide spinner but keep status text
+      const spinner = progressEl.querySelector('.spinner');
+      if (spinner) spinner.style.display = 'none';
+    }
 
   } catch (err) {
-    if (statusEl) statusEl.textContent = `Error: ${err.message || err}`;
-    if (btn) { btn.textContent = 'Retry Analysis'; btn.disabled = false; }
+    if (statusEl) statusEl.textContent = `Analysis failed: ${err.message || err}`;
+    if (progressEl) {
+      const spinner = progressEl.querySelector('.spinner');
+      if (spinner) spinner.style.display = 'none';
+    }
   }
 }
 
