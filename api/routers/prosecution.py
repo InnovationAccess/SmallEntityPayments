@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from google.cloud import bigquery, storage
 from pydantic import BaseModel
 
@@ -1575,57 +1576,43 @@ def get_invoice_pdf(
     download_url: str = Query(..., description="USPTO download URL"),
     filename: str = Query(..., description="PDF filename"),
     cached_gcs_path: Optional[str] = Query(None, description="Pre-resolved GCS path for cached PDF"),
-) -> Dict[str, Any]:
-    """Download a payment invoice PDF to GCS (if not cached) and return a signed URL.
+):
+    """Stream a payment invoice PDF directly to the browser.
 
-    The signed URL expires after 1 hour and can be opened directly in the browser.
-    If cached_gcs_path is provided (from invoice-docs cache check), uses that directly.
+    Checks GCS cache first (using cached_gcs_path or doc_code prefix search),
+    downloads from USPTO if not cached, saves to GCS, then streams the PDF bytes.
     """
-    from datetime import timedelta
-
     gcs_path = f"{GCS_INVOICE_PREFIX}/{application_number}/{filename}"
 
     try:
         gcs_client = storage.Client()
         bucket_obj = gcs_client.bucket(GCS_BUCKET)
+        pdf_bytes = None
 
-        # If a pre-resolved cached path was provided, use it directly
+        # Try pre-resolved cached path first
         if cached_gcs_path:
             blob = bucket_obj.blob(cached_gcs_path)
             if blob.exists():
-                signed_url = blob.generate_signed_url(
-                    version="v4",
-                    expiration=timedelta(hours=1),
-                    method="GET",
-                )
-                return {
-                    "application_number": application_number,
-                    "filename": filename,
-                    "gcs_path": cached_gcs_path,
-                    "signed_url": signed_url,
-                    "cached": True,
-                }
+                pdf_bytes = blob.download_as_bytes()
 
-        # Check exact path first
-        blob = bucket_obj.blob(gcs_path)
-        cached = blob.exists()
+        # Try exact filename match
+        if pdf_bytes is None:
+            blob = bucket_obj.blob(gcs_path)
+            if blob.exists():
+                pdf_bytes = blob.download_as_bytes()
 
-        # If not found by exact name, search by doc_code prefix
-        # (USPTO returns different download identifiers each API call)
-        if not cached:
-            # Extract doc_code from filename: {app}_{docCode}_{identifier}.pdf
+        # Try doc_code prefix search (USPTO changes identifiers each API call)
+        if pdf_bytes is None:
             parts = filename.split("_", 2)
             if len(parts) >= 2:
                 doc_code = parts[1]
                 prefix = f"{GCS_INVOICE_PREFIX}/{application_number}/{application_number}_{doc_code}_"
                 for existing_blob in bucket_obj.list_blobs(prefix=prefix, max_results=1):
-                    blob = existing_blob
-                    gcs_path = existing_blob.name
-                    cached = True
+                    pdf_bytes = existing_blob.download_as_bytes()
                     break
 
-        # Download from USPTO if still not cached
-        if not cached:
+        # Download from USPTO if not in GCS at all
+        if pdf_bytes is None:
             with httpx.Client(timeout=60, follow_redirects=True) as client:
                 resp = client.get(download_url, headers={
                     "X-API-KEY": USPTO_API_KEY,
@@ -1640,22 +1627,21 @@ def get_invoice_pdf(
                         detail=f"USPTO download failed: HTTP {resp.status_code}",
                     )
 
-                blob.upload_from_string(resp.content, content_type="application/pdf")
+                pdf_bytes = resp.content
+                # Cache in GCS for future requests
+                bucket_obj.blob(gcs_path).upload_from_string(
+                    pdf_bytes, content_type="application/pdf"
+                )
 
-        # Generate signed URL (1-hour expiry)
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(hours=1),
-            method="GET",
+        # Stream PDF directly to browser
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "private, max-age=3600",
+            },
         )
-
-        return {
-            "application_number": application_number,
-            "filename": filename,
-            "gcs_path": gcs_path,
-            "signed_url": signed_url,
-            "cached": cached,
-        }
 
     except HTTPException:
         raise

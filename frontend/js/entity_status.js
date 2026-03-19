@@ -2350,35 +2350,22 @@ async function showInvoicePopup(applicationNumber) {
         </table>
       </div>`;
 
-    // Wire up View PDF buttons
+    // Wire up View PDF buttons — endpoint streams PDF directly
     body.querySelectorAll('.es-invoice-view-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        btn.textContent = 'Loading\u2026';
-        try {
-          const params = new URLSearchParams({
-            application_number: btn.dataset.app,
-            download_url: btn.dataset.url,
-            filename: btn.dataset.filename,
-          });
-          if (btn.dataset.cachedPath) {
-            params.set('cached_gcs_path', btn.dataset.cachedPath);
-          }
-          const result = await apiGet(`/api/prosecution/invoice-pdf?${params}`);
-          if (result.signed_url) {
-            window.open(result.signed_url, '_blank');
-          }
-          btn.textContent = 'View';
-          btn.disabled = false;
-          // Mark as cached after first download
-          const cachedCell = btn.closest('tr').querySelector('td:nth-child(5)');
-          if (cachedCell && !cachedCell.querySelector('.es-invoice-cached')) {
-            cachedCell.innerHTML = '<span class="es-invoice-cached" title="Already downloaded">&#x2713;</span>';
-          }
-        } catch (err) {
-          btn.textContent = 'Error';
-          btn.disabled = false;
-          console.error('Invoice PDF error:', err);
+      btn.addEventListener('click', () => {
+        const params = new URLSearchParams({
+          application_number: btn.dataset.app,
+          download_url: btn.dataset.url,
+          filename: btn.dataset.filename,
+        });
+        if (btn.dataset.cachedPath) {
+          params.set('cached_gcs_path', btn.dataset.cachedPath);
+        }
+        window.open(`/api/prosecution/invoice-pdf?${params}`, '_blank');
+        // Mark as cached after viewing
+        const cachedCell = btn.closest('tr').querySelector('td:nth-child(5)');
+        if (cachedCell && !cachedCell.querySelector('.es-invoice-cached')) {
+          cachedCell.innerHTML = '<span class="es-invoice-cached" title="Already downloaded">&#x2713;</span>';
         }
       });
     });
