@@ -89,6 +89,11 @@ class InvoiceKpisRequest(BaseModel):
     application_numbers: List[str]
 
 
+class QueueExtractionRequest(BaseModel):
+    application_numbers: List[str]
+    representative_name: str = ""  # informational only (queued_by)
+
+
 # ── Invoice fee-code → entity status helpers ──────────────────────
 
 _AIA_DATE = _date(2013, 3, 19)
@@ -2216,6 +2221,76 @@ def get_extraction_progress(req: ExtractionProgressRequest) -> Dict[str, Any]:
         "extraction_pct": extraction_pct,
         "phase": phase,
     }
+
+
+@router.post("/queue-extraction")
+def queue_extraction(req: QueueExtractionRequest) -> Dict[str, Any]:
+    """Queue application numbers for invoice extraction and trigger the worker.
+
+    1. MERGEs app numbers into invoice_extraction_queue (upsert, no duplicates)
+    2. Checks if the Cloud Run Job is already running
+    3. Triggers the worker if not running
+    """
+    if not req.application_numbers:
+        return {"status": "empty", "queued": 0, "message": "No application numbers provided."}
+
+    client = bigquery.Client(location="us-west1")
+
+    # Step 1: MERGE app numbers into queue (upsert)
+    merge_sql = """
+    MERGE `uspto-data-app.uspto_data.invoice_extraction_queue` T
+    USING UNNEST(@apps) AS app_number
+    ON T.application_number = app_number
+    WHEN NOT MATCHED THEN
+      INSERT (application_number, queued_at, queued_by)
+      VALUES (app_number, CURRENT_TIMESTAMP(), @queued_by)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("apps", "STRING", req.application_numbers),
+            bigquery.ScalarQueryParameter("queued_by", "STRING", req.representative_name or "unknown"),
+        ]
+    )
+    merge_job = client.query(merge_sql, job_config=job_config)
+    merge_job.result()  # wait for completion
+    queued_count = len(req.application_numbers)
+
+    # Step 2: Check if worker is already running
+    try:
+        from google.cloud import run_v2
+
+        exec_client = run_v2.ExecutionsClient()
+        job_name = "projects/uspto-data-app/locations/us-central1/jobs/uspto-extract-invoices"
+        executions = exec_client.list_executions(parent=job_name)
+        for ex in executions:
+            if ex.running_count and ex.running_count > 0:
+                return {
+                    "status": "already_running",
+                    "queued": queued_count,
+                    "message": f"Queued {queued_count:,} applications. Worker already running.",
+                }
+            break  # only check most recent execution
+
+        # Step 3: Trigger the worker — no ENTITY_NAME override
+        jobs_client = run_v2.JobsClient()
+        run_request = run_v2.RunJobRequest(name=job_name)
+        operation = jobs_client.run_job(request=run_request)
+        exec_name = operation.metadata.name if hasattr(operation, "metadata") else "started"
+
+        return {
+            "status": "started",
+            "queued": queued_count,
+            "execution_name": str(exec_name),
+            "message": f"Queued {queued_count:,} applications. Worker started.",
+        }
+
+    except Exception as e:
+        logger.error("Failed to check/trigger Cloud Run Job: %s", e)
+        return {
+            "status": "queued_only",
+            "queued": queued_count,
+            "message": f"Queued {queued_count:,} applications. Could not trigger worker: {e}",
+        }
 
 
 # ── Helpers ───────────────────────────────────────────────────────

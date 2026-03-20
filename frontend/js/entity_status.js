@@ -1613,6 +1613,9 @@ async function fetchProsecutionPaymentsAuto(entityName, allApps) {
     // Fetch extraction progress (non-blocking, shows warning + gauges)
     fetchExtractionProgress(entityName, allApps);
 
+    // Queue app numbers for extraction and trigger worker if not running
+    queueExtraction(entityName, allApps);
+
     // Populate KPIs
     const k = merged.kpis || {};
     const setKpi = (id, val) => {
@@ -2516,6 +2519,24 @@ async function fetchExtractionProgress(entityName, allApps) {
     warningEl.className = 'es-event-code-warning';
     warningEl.style.display = '';
     progressSection.style.display = 'none';
+  }
+}
+
+/**
+ * Queue application numbers for invoice extraction and trigger the worker.
+ * Fire-and-forget — the extraction progress gauges (already polling every 30s)
+ * will show progress as the worker processes apps.
+ */
+async function queueExtraction(entityName, allApps) {
+  if (!allApps || allApps.length === 0) return;
+  try {
+    const resp = await apiPost('/api/entity-status/queue-extraction', {
+      application_numbers: allApps,
+      representative_name: entityName,
+    });
+    console.log('Extraction queue response:', resp);
+  } catch (err) {
+    console.warn('Failed to queue extraction:', err);
   }
 }
 

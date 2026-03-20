@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Orchestrate the full invoice extraction pipeline for an entity.
+"""Queue-driven invoice extraction pipeline worker.
 
-This is a Cloud Run Job entrypoint that manages the entire pipeline:
-  Phase 1: Download payment receipt PDFs from USPTO to GCS (parallel threads)
-  Phase 2: Extract fee line items from PDFs using Gemini Vision (rate-limited)
+This is a Cloud Run Job entrypoint that processes application numbers
+from the invoice_extraction_queue table:
+  1. Reads all queued application numbers from BigQuery
+  2. Checks which apps are already processed (in invoice_extractions)
+  3. Downloads payment receipt PDFs from USPTO to GCS (parallel threads)
+  4. Extracts fee line items from PDFs using Gemini Vision (rate-limited)
+
+Entity-name-agnostic — only cares about application numbers. The queue
+is populated by the API server when users click Analyze Portfolio.
 
 Only downloads N417.PYMT (electronic payment receipts) and IFEE (issue fee)
 documents. Fee codes are self-describing: first digit encodes entity size
@@ -13,10 +19,8 @@ All state is tracked in BigQuery for resumability. If the job times out
 or fails, re-running it picks up where it left off.
 
 Environment variables:
-  ENTITY_NAME — entity to process (required)
   PARALLEL_DOWNLOADS — number of parallel download threads (default 5)
   MAX_APPS — limit for testing (default: all)
-  FILING_YEARS — number of years of filings to cover (default 10)
   GCP_PROJECT_ID — GCP project (default: uspto-data-app)
   BIGQUERY_DATASET — BQ dataset (default: uspto_data)
 """
@@ -55,99 +59,25 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────
 
-ENTITY_NAME = os.environ.get("ENTITY_NAME", "")
 PARALLEL_DOWNLOADS = int(os.environ.get("PARALLEL_DOWNLOADS", "5"))
 MAX_APPS = int(os.environ.get("MAX_APPS", "0"))  # 0 = unlimited
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "uspto-data-app")
 BQ_DATASET = os.environ.get("BIGQUERY_DATASET", "uspto_data")
 
 
-def _expand_name_via_mdm(bq_client: bigquery.Client, name: str) -> list[str]:
-    """Resolve a name through the MDM name_unification table.
+def get_queued_app_numbers(bq_client: bigquery.Client) -> list[str]:
+    """Read all distinct application numbers from the extraction queue table.
 
-    Returns all associated_names for the representative name group.
-    If the name is not in the MDM system, returns just the original name.
-    This is the same logic as bq_service.expand_name_for_query().
+    The queue is populated by the API server when a user clicks Analyze Portfolio.
+    This worker is entity-name-agnostic — it processes all queued apps regardless
+    of which entity portfolio they belong to.
     """
-    sql = f"""
-    WITH rep AS (
-      SELECT representative_name
-      FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.name_unification`
-      WHERE LOWER(associated_name) = LOWER(@name)
-      LIMIT 1
-    )
-    SELECT DISTINCT associated_name
-    FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.name_unification`
-    WHERE representative_name = (SELECT representative_name FROM rep)
-    """
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
-    )
-    rows = list(bq_client.query(sql, job_config=job_config).result())
-    if rows:
-        names = [r.associated_name for r in rows]
-        logger.info("MDM resolved '%s' → %d associated names", name, len(names))
-        return names
-    logger.warning("'%s' not found in MDM name_unification — using as-is", name)
-    return [name]
-
-
-def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
-    """Get all application numbers for an entity via MDM name resolution.
-
-    Resolves ENTITY_NAME through the name_unification table to get all
-    associated names, then searches pfw_applicants, pfw_inventors, and
-    pat_assign_assignees using exact IN matching (not LIKE).
-    Same portfolio logic as entity_status.py.
-    """
-    # Step 1: Resolve through MDM
-    expanded = _expand_name_via_mdm(bq_client, ENTITY_NAME)
-
-    # Build parameterized IN clause for all expanded names
-    name_params = []
-    for i, n in enumerate(expanded):
-        name_params.append(bigquery.ScalarQueryParameter(f"name_{i}", "STRING", n))
-    name_in = ", ".join(f"@name_{i}" for i in range(len(expanded)))
-
-    # Default: last 10 years of filings. Set FILING_YEARS env var to override.
-    filing_years = int(os.environ.get("FILING_YEARS", "10"))
-
     query = f"""
-    WITH portfolio AS (
-        -- Source 1: pfw_applicants (exact name match via MDM)
-        SELECT DISTINCT application_number
-        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_applicants`
-        WHERE applicant_name IN ({name_in})
-
-        UNION DISTINCT
-
-        -- Source 2: pfw_inventors (for individual inventors)
-        SELECT DISTINCT application_number
-        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_inventors`
-        WHERE inventor_name IN ({name_in})
-
-        UNION DISTINCT
-
-        -- Source 3: pat_assign_assignees (acquired via assignment)
-        SELECT DISTINCT d.application_number
-        FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_assignees` a
-        JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_documents` d
-          ON a.reel_frame = d.reel_frame
-        WHERE a.assignee_name IN ({name_in})
-    )
-    SELECT p.application_number, pfw.filing_date
-    FROM portfolio p
-    JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.patent_file_wrapper_v2` pfw
-      ON p.application_number = pfw.application_number
-    -- Utility apps only (numeric). PCT/design/reissue don't work with USPTO Documents API.
-    WHERE REGEXP_CONTAINS(p.application_number, r'^\\d+$')
-      AND pfw.filing_date >= DATE_SUB(CURRENT_DATE(), INTERVAL {filing_years} YEAR)
-    -- Most recently filed first (most actionable for monetization)
-    ORDER BY pfw.filing_date DESC
+    SELECT DISTINCT application_number
+    FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.invoice_extraction_queue`
+    ORDER BY application_number
     """
-
-    job_config = bigquery.QueryJobConfig(query_parameters=name_params)
-    rows = list(bq_client.query(query, job_config=job_config).result())
+    rows = list(bq_client.query(query).result())
     return [r.application_number for r in rows]
 
 
@@ -376,15 +306,8 @@ def _insert_extraction_row(
 # ── Main orchestration ───────────────────────────────────────────
 
 def main():
-    if not ENTITY_NAME:
-        logger.error("ENTITY_NAME environment variable is required")
-        sys.exit(1)
-
-    filing_years = int(os.environ.get("FILING_YEARS", "10"))
     logger.info("=" * 60)
-    logger.info("Invoice Pipeline Orchestrator")
-    logger.info("Entity: %s", ENTITY_NAME)
-    logger.info("Filing window: last %d years", filing_years)
+    logger.info("Invoice Pipeline Worker (queue-driven)")
     logger.info("Parallel downloads: %d", PARALLEL_DOWNLOADS)
     logger.info("Max apps: %s", MAX_APPS or "unlimited")
     logger.info("=" * 60)
@@ -394,10 +317,14 @@ def main():
 
     # ── Phase 1: DOWNLOAD ─────────────────────────────────────────
 
-    logger.info("Phase 1: Getting entity portfolio...")
-    all_apps = get_entity_app_numbers(bq_client)
+    logger.info("Phase 1: Reading application numbers from queue...")
+    all_apps = get_queued_app_numbers(bq_client)
     total_apps = len(all_apps)
-    logger.info("Found %d applications for %s", total_apps, ENTITY_NAME)
+    logger.info("Found %d applications in extraction queue", total_apps)
+
+    if total_apps == 0:
+        logger.info("Queue is empty — nothing to process")
+        return
 
     if MAX_APPS > 0:
         all_apps = all_apps[:MAX_APPS]
@@ -409,7 +336,7 @@ def main():
     logger.info("Already downloaded: %d, Remaining: %d", len(already_downloaded), len(remaining))
 
     update_pipeline_status(
-        bq_client, ENTITY_NAME, "downloading",
+        bq_client, "queue_worker", "downloading",
         total_apps=len(all_apps),
         downloaded_apps=len(already_downloaded),
     )
@@ -440,7 +367,7 @@ def main():
                         completed, len(remaining), total_docs_downloaded, len(download_errors),
                     )
                     update_pipeline_status(
-                        bq_client, ENTITY_NAME, "downloading",
+                        bq_client, "queue_worker", "downloading",
                         total_apps=len(all_apps),
                         downloaded_apps=len(already_downloaded) + completed,
                         downloaded_docs=total_docs_downloaded,
@@ -452,7 +379,7 @@ def main():
 
     logger.info("Phase 2: Extracting fee data from downloaded PDFs via Gemini Vision...")
     update_pipeline_status(
-        bq_client, ENTITY_NAME, "extracting",
+        bq_client, "queue_worker", "extracting",
         total_apps=len(all_apps),
         downloaded_apps=len(all_apps),
     )
@@ -494,7 +421,7 @@ def main():
                     total_done, len(unextracted), extracted_count, failed_count,
                 )
                 update_pipeline_status(
-                    bq_client, ENTITY_NAME, "extracting",
+                    bq_client, "queue_worker", "extracting",
                     total_apps=len(all_apps),
                     downloaded_apps=len(all_apps),
                     extracted_docs=extracted_count,
@@ -521,7 +448,7 @@ def main():
     summary = list(bq_client.query(summary_query, job_config=job_config).result())[0]
 
     update_pipeline_status(
-        bq_client, ENTITY_NAME, "complete",
+        bq_client, "queue_worker", "complete",
         total_apps=len(all_apps),
         downloaded_apps=len(all_apps),
         downloaded_docs=summary.total_docs,
@@ -532,7 +459,7 @@ def main():
 
     logger.info("=" * 60)
     logger.info("PIPELINE COMPLETE")
-    logger.info("Entity: %s", ENTITY_NAME)
+    logger.info("Mode: queue-driven")
     logger.info("Applications: %d", len(all_apps))
     logger.info("Documents: %d total, %d extracted, %d failed, %d apps with no payment receipts",
                 summary.total_docs, summary.extracted, summary.failed, summary.no_docs)
