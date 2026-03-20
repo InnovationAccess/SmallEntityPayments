@@ -1921,7 +1921,16 @@ def get_invoice_kpis(req: InvoiceKpisRequest) -> Dict[str, Any]:
 
     for row in rows:
         app = row.application_number
-        mail_date = row.mail_date  # DATE from BigQuery
+        mail_date_raw = row.mail_date  # may be date, datetime, or str
+        if isinstance(mail_date_raw, str):
+            try:
+                mail_date = _date.fromisoformat(mail_date_raw)
+            except ValueError:
+                mail_date = None
+        elif isinstance(mail_date_raw, _date):
+            mail_date = mail_date_raw
+        else:
+            mail_date = None
         fees_raw = row.fees_json
         if not fees_raw:
             continue
