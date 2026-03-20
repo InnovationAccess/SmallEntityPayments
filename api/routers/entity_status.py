@@ -1924,7 +1924,7 @@ def get_invoice_kpis(req: InvoiceKpisRequest) -> Dict[str, Any]:
         mail_date_raw = row.mail_date  # may be date, datetime, or str
         if isinstance(mail_date_raw, str):
             try:
-                mail_date = _date.fromisoformat(mail_date_raw)
+                mail_date = _date.fromisoformat(mail_date_raw[:10])
             except ValueError:
                 mail_date = None
         elif isinstance(mail_date_raw, _date):
