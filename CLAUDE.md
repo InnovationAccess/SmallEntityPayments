@@ -1,7 +1,7 @@
 # SmallEntityPayments — Project Instructions
 
 ## Quick Start
-- Read HANDOFF316.md for full project context, architecture, and current state
+- Read HANDOFF317.md for full project context, architecture, and current state
 - This project lives at: https://github.com/InnovationAccess/SmallEntityPayments
 - GCP Project: uspto-data-app
 - BigQuery Dataset: uspto_data (location: us-west1)
@@ -15,6 +15,8 @@
 - The `etl/load_file_wrapper.py` script is DEPRECATED and deleted — do not recreate it
 - NEVER search a string across multiple fields simultaneously (e.g., `WHERE app_num = @id OR patent_num = @id`) — this causes collisions between patent numbers and application serial numbers. Always resolve to application_number first via patent_file_wrapper_v2.
 - Entity status must be DERIVED from maintenance fee event codes (M1xxx/F17xx=LARGE, M2xxx/F27xx=SMALL, M3xxx=MICRO), never from the entity_status column (which USPTO populates inconsistently)
+- NEVER use LIKE '%name%' for entity name searches outside the MDM tab — always resolve through MDM representative name → expand to all associated names → exact IN (...) matching. The canonical function is `bq_service.expand_name_for_query()`.
+- Entity Status tab requires MDM-normalized names — analysis blocks if the searched name is not in the MDM system
 
 ## BigQuery Rules
 - ALL `bq` CLI commands MUST include `--location=us-west1` — omitting this causes silent failures
@@ -66,17 +68,21 @@
 - All BigQuery tables use flat/denormalized schemas (no STRUCT/ARRAY except cpc_codes)
 - Cross-table joins use application_number as the universal key (not patent_number)
 
-## Current State (2026-03-18)
-- All tables loaded: ~1.9 billion rows across 27 tables (~155 GB)
+## Current State (2026-03-20)
+- All tables loaded: ~1.93 billion rows across 31 tables (~155 GB)
 - Patent assignments normalized into 4 tables (v4): pat_assign_records, pat_assign_assignors, pat_assign_assignees, pat_assign_documents — linked by reel_frame, cross-table joins via application_number
 - **Conveyance normalization complete**: All 9.07M assignment records classified into 14 fine-grained `normalized_type` categories. `employer_assignment` boolean fully populated. 15,806 uncertain records flagged as `review`.
 - **Prosecution fee calculation engine deployed**: `utils/fee_schedule.py` computes exact dollar amounts for prosecution payments using 12 fee categories × 7 fee schedule periods × 3 entity sizes. Expert-verified forensic rules.
 - **Dollar Impact KPIs live in frontend**: Amount Paid, Large Rate, Underpayment — both all-time and 10-year
 - Prosecution payment analysis cached in BigQuery (`prosecution_payment_cache` with `cache_version=2`)
+- **Invoice extraction pipeline in progress**: 13,359 rows in `invoice_extractions` (6,391 extracted, 4,871 pending, 2,093 no_docs, 4 failed). Pipeline needs re-run with MDM-fixed code for full coverage.
+- **Extraction progress gauges deployed**: Red warning banner + two progress bars (retrieval + extraction) in prosecution section, auto-polls every 30s
+- **MDM normalization gate**: Entity Status blocks analysis on unnormalized names — forces representative name resolution first
+- **All LIKE name matching eliminated**: Entity name searches use MDM resolution → exact IN (...) matching everywhere
 - PASDL daily pipeline automatically normalizes new records via `resolve_assignment_pending()` post-load
-- 4 automated update pipelines running on Cloud Scheduler
+- 5 automated pipelines running on Cloud Scheduler (4 ETL + SEC leads)
 - 9 frontend tabs: MDM, Query Builder, AI Assistant, Forward Citations, Entity Status, Prosecution Fees, Update Log, SEC Leads
-- Entity Status tab: ownership window filtering, micro chart timelines, prosecution payment analysis with dollar amounts, patent litigation integration
+- Entity Status tab: ownership window filtering, micro chart timelines, prosecution payment analysis with dollar amounts, patent litigation integration, extraction progress gauges
 - Assignment popup shows normalized_type ("Type" column), movable + resizable
 - Patent litigation integration via Unified Patents API, cached 30 days
 
@@ -134,8 +140,8 @@ The `pat_assign_records.normalized_type` column classifies each assignment into 
 - `/api/sec-leads/*` — SEC EDGAR lead enrichment (api/routers/sec_leads.py)
 
 ## Frontend Cache-Busting Versions
-- styles.css?v=25, app.js?v=17, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8
-- citations.js?v=5, entity_status.js?v=29, prosecution.js?v=9, etl_log.js?v=3, sec_leads.js?v=3
+- styles.css?v=29, app.js?v=17, mdm.js?v=8, query_builder.js?v=9, ai_assistant.js?v=8
+- citations.js?v=5, entity_status.js?v=36, prosecution.js?v=9, etl_log.js?v=3, sec_leads.js?v=3
 - ALWAYS bump the ?v= number when changing any JS or CSS file — browsers aggressively cache these
 
 ## ETL Pipeline
