@@ -2285,7 +2285,7 @@ def queue_extraction(req: QueueExtractionRequest) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error("Failed to check/trigger Cloud Run Job: %s", e)
+        log.error("Failed to check/trigger Cloud Run Job: %s", e)
         return {
             "status": "queued_only",
             "queued": queued_count,
