@@ -40,11 +40,11 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
     With *, the * positions become SQL % wildcards.
 
     Examples:
-      "etri"            → and_terms=["etri"], not_terms=[]       (exact match)
-      "GOOG*"           → and_terms=["GOOG%"], not_terms=[]      (starts with)
-      "*etri*"          → and_terms=["%etri%"], not_terms=[]      (contains)
-      "+MICRO*+CORP"    → and_terms=["MICRO%", "CORP"], not_terms=[]
-      "+APPLE+-INC"     → and_terms=["APPLE"], not_terms=["INC"]
+      "etri"            → and_terms=["etri"], not_terms=[]          (exact match)
+      "GOOG*"           → and_terms=["%GOOG%"], not_terms=[]        (contains GOOG…)
+      "*etri*"          → and_terms=["%etri%"], not_terms=[]         (contains etri)
+      "+KOR*+INS*"      → and_terms=["%KOR%", "%INS%"], not_terms=[]  (contains KOR AND INS)
+      "+APPLE+-INC"     → and_terms=["APPLE"], not_terms=["%INC%"]
     """
     and_terms: List[str] = []
     not_terms: List[str] = []
@@ -64,8 +64,18 @@ def _parse_boolean_query(query: str) -> Tuple[List[str], List[str]]:
         if not part:
             continue
 
-        # Replace * with % for SQL LIKE — only where user placed wildcards.
+        # Replace * with % for SQL LIKE.
         term = part.replace("*", "%")
+
+        # Auto-wrap with % for true substring matching:
+        # "KOR%" (starts-with) → "%KOR%" (contains KOR…)
+        # Without this, "+KOR* +INS*" would require the name to
+        # START WITH both KOR and INS, which is impossible.
+        if "%" in term:
+            if not term.startswith("%"):
+                term = "%" + term
+            if not term.endswith("%"):
+                term = term + "%"
 
         if is_not:
             not_terms.append(term)
