@@ -1136,7 +1136,7 @@ function renderApplicantPortfolio(data) {
               <span class="cite-stat-label">Apps w/ Findings</span>
             </div>
           </div>
-          <p class="text-muted" style="margin:0.75rem 0 0.25rem;font-size:0.8rem;font-weight:600">Dollar Impact — Reduced-Rate Payments (Small + Micro)</p>
+          <p class="text-muted" style="margin:0.75rem 0 0.25rem;font-size:0.8rem;font-weight:600">Dollar Impact — Reduced-Rate Payments (Small + Micro) <span id="es-dollar-source-badge" class="es-data-source-badge event-code">Event Code Data</span></p>
           <div class="cite-summary-grid">
             <div class="cite-stat">
               <span class="cite-stat-value" id="es-pros-pay-dollars-paid">$0</span>
@@ -2260,7 +2260,34 @@ function _attachProsPayTooltip(marker, ev) {
 
     if (appExtractions && appExtractions.length > 0) {
       html += `<div class="tt-divider"></div>`;
-      html += `<div class="tt-ext-header">📄 ${appExtractions.length} invoice${appExtractions.length > 1 ? 's' : ''} extracted</div>`;
+
+      // Derive entity status from fee codes across all invoices
+      const invoiceStatuses = new Set();
+      for (const ext of appExtractions) {
+        for (const fee of (ext.fees || [])) {
+          const fc = (fee.fee_code || '').toString();
+          if (fc.length > 0) {
+            const d = fc[0];
+            if (d === '1') invoiceStatuses.add('LARGE');
+            else if (d === '2' || d === '4') invoiceStatuses.add('SMALL');
+            else if (d === '3') invoiceStatuses.add('MICRO');
+          }
+        }
+      }
+
+      // Show invoice-derived entity status prominently
+      if (invoiceStatuses.size > 0) {
+        const badges = [...invoiceStatuses].map(s =>
+          `<span class="es-status-badge es-status-${s.toLowerCase()}">${s}</span>`
+        ).join(' ');
+        let discrepancy = '';
+        if (ev._prosStatus && !invoiceStatuses.has(ev._prosStatus)) {
+          discrepancy = ' <span class="tt-discrepancy">differs from event code</span>';
+        }
+        html += `<div class="tt-invoice-status">Invoice: ${badges}${discrepancy}</div>`;
+      }
+
+      html += `<div class="tt-ext-header">\uD83D\uDCC4 ${appExtractions.length} invoice${appExtractions.length > 1 ? 's' : ''} extracted</div>`;
 
       // Show up to 3 most relevant invoices (closest to event date first)
       const sorted = [...appExtractions].sort((a, b) => {
@@ -2271,7 +2298,7 @@ function _attachProsPayTooltip(marker, ev) {
       const shown = sorted.slice(0, 3);
 
       for (const ext of shown) {
-        const amt = ext.total_amount != null ? `$${Number(ext.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—';
+        const amt = ext.total_amount != null ? `$${Number(ext.total_amount).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '\u2014';
         const feeCount = (ext.fees || []).length;
         const extStatus = ext.entity_status
           ? `<span class="es-status-badge es-status-${ext.entity_status.toLowerCase()}">${ext.entity_status}</span>`
@@ -2282,6 +2309,16 @@ function _attachProsPayTooltip(marker, ev) {
         html += `${extStatus} `;
         html += `<strong>${amt}</strong>`;
         if (feeCount > 0) html += ` <span class="tt-ext-fees">(${feeCount} fees)</span>`;
+        // View PDF link using existing endpoint
+        if (ext.gcs_path) {
+          const pdfParams = new URLSearchParams({
+            application_number: ev._prosApp,
+            download_url: '',
+            filename: ext.gcs_path.split('/').pop() || 'invoice.pdf',
+            cached_gcs_path: ext.gcs_path,
+          });
+          html += ` <a class="tt-view-pdf" href="/api/prosecution/invoice-pdf?${pdfParams}" target="_blank" onclick="event.stopPropagation()">View PDF</a>`;
+        }
         html += `</div>`;
 
         // Show individual fee items for the closest invoice
@@ -2289,7 +2326,7 @@ function _attachProsPayTooltip(marker, ev) {
           html += `<div class="tt-fee-items">`;
           for (const fee of ext.fees.slice(0, 6)) {
             const feeAmt = fee.amount != null ? `$${Number(fee.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '';
-            html += `<div class="tt-fee-item">${escHtml(fee.description || fee.fee_code || '?')} — ${feeAmt}</div>`;
+            html += `<div class="tt-fee-item">${escHtml(fee.description || fee.fee_code || '?')} \u2014 ${feeAmt}</div>`;
           }
           if (ext.fees.length > 6) {
             html += `<div class="tt-fee-item tt-more">+ ${ext.fees.length - 6} more</div>`;
@@ -2420,16 +2457,20 @@ async function fetchExtractionProgress(entityName, allApps) {
     const extractionPct = resp.extraction_pct || 0;
 
     if (phase === 'complete' && extracted > 0) {
-      // Extraction complete — green success message
+      // Extraction complete — green success message, switch to invoice KPIs
       warningEl.className = 'es-event-code-warning ready';
-      warningEl.innerHTML = '<strong>\u2713 Invoice Data Available:</strong> ' +
-        extracted.toLocaleString() + ' payment invoices extracted across ' +
+      warningEl.innerHTML = '<strong>\u2713 Invoice KPIs Active:</strong> ' +
+        'Dollar amounts computed from ' +
+        extracted.toLocaleString() + ' extracted payment invoices across ' +
         appsChecked.toLocaleString() + ' applications.' +
         (noDocs > 0 ? ' ' + noDocs.toLocaleString() + ' apps had no payment receipts.' : '') +
         (failed > 0 ? ' ' + failed.toLocaleString() + ' extractions failed.' : '');
       warningEl.style.display = '';
       progressSection.style.display = 'none';
       if (_extractionPollTimer) { clearInterval(_extractionPollTimer); _extractionPollTimer = null; }
+
+      // Fetch invoice-based KPIs to replace event-code dollar amounts
+      fetchInvoiceKpis(entityName, allApps);
 
     } else if (phase === 'not_started') {
       // No extraction data — red warning, no gauges
@@ -2475,6 +2516,46 @@ async function fetchExtractionProgress(entityName, allApps) {
     warningEl.className = 'es-event-code-warning';
     warningEl.style.display = '';
     progressSection.style.display = 'none';
+  }
+}
+
+/**
+ * Fetch invoice-based KPIs and overlay them on the Dollar Impact section.
+ * Called when extraction is complete (phase === 'complete').
+ */
+async function fetchInvoiceKpis(entityName, allApps) {
+  if (!allApps || allApps.length === 0) return;
+  try {
+    const resp = await apiPost('/api/entity-status/invoice-kpis', {
+      applicant_name: entityName,
+      application_numbers: allApps,
+    });
+
+    window._invoiceKpis = resp;
+
+    const k = resp.kpis || {};
+
+    // Overlay dollar KPIs with invoice-based numbers
+    const setDollar = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '$' + Math.round(val || 0).toLocaleString();
+    };
+    setDollar('es-pros-pay-dollars-paid', k.reduced_paid);
+    setDollar('es-pros-pay-dollars-large', k.reduced_large_rate);
+    setDollar('es-pros-pay-dollars-delta', k.reduced_underpayment);
+    setDollar('es-pros-pay-dollars-paid-10y', k.reduced_paid_10y);
+    setDollar('es-pros-pay-dollars-large-10y', k.reduced_large_rate_10y);
+    setDollar('es-pros-pay-dollars-delta-10y', k.reduced_underpayment_10y);
+
+    // Switch data source badge to green "Invoice Data"
+    const badge = document.getElementById('es-dollar-source-badge');
+    if (badge) {
+      badge.className = 'es-data-source-badge invoice';
+      badge.textContent = 'Invoice Data';
+    }
+  } catch (err) {
+    // Non-critical — event-code KPIs remain in place
+    console.warn('Invoice KPI fetch failed:', err);
   }
 }
 

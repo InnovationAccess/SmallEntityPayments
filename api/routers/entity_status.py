@@ -84,6 +84,55 @@ class ExtractionProgressRequest(BaseModel):
     application_numbers: List[str]
 
 
+class InvoiceKpisRequest(BaseModel):
+    applicant_name: str
+    application_numbers: List[str]
+
+
+# ── Invoice fee-code → entity status helpers ──────────────────────
+
+_AIA_DATE = _date(2013, 3, 19)
+_UAIA_DATE = _date(2022, 12, 29)
+
+
+def _entity_from_fee_code(fee_code: str | None) -> str:
+    """Derive entity status from the first digit of a USPTO fee code.
+
+    1xxx = LARGE, 2xxx = SMALL, 3xxx = MICRO, 4xxx = SMALL (electronic).
+    Returns 'LARGE' if fee_code is None or unrecognizable.
+    """
+    if not fee_code or len(fee_code) < 1:
+        return "LARGE"
+    d = fee_code[0]
+    if d == "1":
+        return "LARGE"
+    if d in ("2", "4"):
+        return "SMALL"
+    if d == "3":
+        return "MICRO"
+    return "LARGE"
+
+
+def _large_rate_multiplier(entity_status: str, mail_date: _date | None) -> float:
+    """Return the multiplier to convert a discounted amount to large-rate equivalent.
+
+    Discount ratios (from utils/fee_schedule.py):
+      Pre-AIA (before Mar 19, 2013): Small = 50% of Large (×2.0), Micro didn't exist (=Small)
+      AIA to UAIA (Mar 19, 2013 – Dec 28, 2022): Small = 50% (×2.0), Micro = 25% (×4.0)
+      Post-UAIA (Dec 29, 2022+): Small = 40% (×2.5), Micro = 20% (×5.0)
+    """
+    if entity_status == "LARGE":
+        return 1.0
+    if mail_date is None:
+        return 2.0  # safe default
+    if mail_date >= _UAIA_DATE:
+        return 5.0 if entity_status == "MICRO" else 2.5
+    if mail_date >= _AIA_DATE:
+        return 4.0 if entity_status == "MICRO" else 2.0
+    # Pre-AIA: micro didn't exist, treat as small
+    return 2.0
+
+
 # ── Prosecution Payment Analysis Constants ────────────────────────
 
 # Status-change event codes → new entity status
@@ -1810,6 +1859,175 @@ def get_applicant_portfolio(req: ApplicantRequest) -> Dict[str, Any]:
             "decl_micr": pg_decl_micr,
         },
         "results": results,
+    }
+
+
+# ── Invoice-Based KPIs (from extracted PDF data) ─────────────────
+
+@router.post("/invoice-kpis")
+def get_invoice_kpis(req: InvoiceKpisRequest) -> Dict[str, Any]:
+    """Compute prosecution KPIs from extracted invoice data (not event codes).
+
+    Parses fees_json from invoice_extractions, determines entity status
+    from fee_code first digit (1=LARGE, 2=SMALL, 3=MICRO, 4=SMALL),
+    and uses ratio-based multipliers to compute large-rate equivalents
+    and underpayment amounts.
+    """
+    if not req.application_numbers:
+        return {"kpis": {}, "per_app": {}, "source": "invoice"}
+
+    client = bigquery.Client(location="us-west1")
+
+    # Fetch all extracted invoices — same dedup logic as extraction-data endpoint
+    query = """
+    SELECT
+      application_number,
+      mail_date,
+      fees_json,
+      total_amount,
+      gcs_path
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY gcs_path ORDER BY extracted_at DESC) as rn
+      FROM `uspto-data-app.uspto_data.invoice_extractions`
+      WHERE application_number IN UNNEST(@apps)
+        AND (extraction_status = 'extracted'
+             OR (extraction_status IS NULL AND total_amount IS NOT NULL))
+    )
+    WHERE rn = 1
+    ORDER BY application_number, mail_date
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("apps", "STRING", req.application_numbers)
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+
+    # Accumulators
+    kpi_s = kpi_m = kpi_l = 0
+    kpi_s10 = kpi_m10 = kpi_l10 = 0
+    apps_findings: set = set()
+    apps_findings_10y: set = set()
+
+    tot_paid = tot_large = tot_delta = 0.0
+    red_paid = red_large = red_delta = 0.0
+    tot_paid_10 = tot_large_10 = tot_delta_10 = 0.0
+    red_paid_10 = red_large_10 = red_delta_10 = 0.0
+
+    ten_yr_cutoff = _date.today().replace(year=_date.today().year - 10)
+
+    per_app: Dict[str, dict] = {}
+
+    for row in rows:
+        app = row.application_number
+        mail_date = row.mail_date  # DATE from BigQuery
+        fees_raw = row.fees_json
+        if not fees_raw:
+            continue
+        try:
+            fees = json.loads(fees_raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(fees, list):
+            continue
+
+        for fee in fees:
+            if not isinstance(fee, dict):
+                continue
+            amount = 0.0
+            try:
+                amount = float(fee.get("amount") or 0)
+            except (ValueError, TypeError):
+                continue
+            if amount <= 0:
+                continue
+
+            fee_code = str(fee.get("fee_code") or "")
+            entity = _entity_from_fee_code(fee_code)
+            mult = _large_rate_multiplier(entity, mail_date)
+            large_equiv = round(amount * mult, 2)
+            delta = round(large_equiv - amount, 2)
+
+            is_reduced = entity in ("SMALL", "MICRO")
+            is_10y = mail_date is not None and mail_date >= ten_yr_cutoff
+
+            # Count KPIs
+            if entity == "SMALL":
+                kpi_s += 1
+                apps_findings.add(app)
+                if is_10y:
+                    kpi_s10 += 1
+                    apps_findings_10y.add(app)
+            elif entity == "MICRO":
+                kpi_m += 1
+                apps_findings.add(app)
+                if is_10y:
+                    kpi_m10 += 1
+                    apps_findings_10y.add(app)
+            else:
+                kpi_l += 1
+                if is_10y:
+                    kpi_l10 += 1
+
+            # Dollar totals
+            tot_paid += amount
+            tot_large += large_equiv
+            tot_delta += delta
+            if is_reduced:
+                red_paid += amount
+                red_large += large_equiv
+                red_delta += delta
+            if is_10y:
+                tot_paid_10 += amount
+                tot_large_10 += large_equiv
+                tot_delta_10 += delta
+                if is_reduced:
+                    red_paid_10 += amount
+                    red_large_10 += large_equiv
+                    red_delta_10 += delta
+
+            # Per-app accumulation
+            if app not in per_app:
+                per_app[app] = {
+                    "paid": 0.0, "large": 0.0, "delta": 0.0,
+                    "small": 0, "micro": 0, "large_count": 0, "fee_count": 0,
+                }
+            pa = per_app[app]
+            pa["paid"] += amount
+            pa["large"] += large_equiv
+            pa["delta"] += delta
+            pa["fee_count"] += 1
+            if entity == "SMALL":
+                pa["small"] += 1
+            elif entity == "MICRO":
+                pa["micro"] += 1
+            else:
+                pa["large_count"] += 1
+
+    return {
+        "kpis": {
+            "small": kpi_s, "micro": kpi_m, "large": kpi_l,
+            "total": kpi_s + kpi_m + kpi_l,
+            "apps_with_findings": len(apps_findings),
+            "small_10y": kpi_s10, "micro_10y": kpi_m10, "large_10y": kpi_l10,
+            "total_10y": kpi_s10 + kpi_m10 + kpi_l10,
+            "apps_with_findings_10y": len(apps_findings_10y),
+            "total_paid": round(tot_paid, 2),
+            "total_large_rate": round(tot_large, 2),
+            "total_underpayment": round(tot_delta, 2),
+            "reduced_paid": round(red_paid, 2),
+            "reduced_large_rate": round(red_large, 2),
+            "reduced_underpayment": round(red_delta, 2),
+            "total_paid_10y": round(tot_paid_10, 2),
+            "total_large_rate_10y": round(tot_large_10, 2),
+            "total_underpayment_10y": round(tot_delta_10, 2),
+            "reduced_paid_10y": round(red_paid_10, 2),
+            "reduced_large_rate_10y": round(red_large_10, 2),
+            "reduced_underpayment_10y": round(red_delta_10, 2),
+        },
+        "per_app": per_app,
+        "source": "invoice",
     }
 
 
