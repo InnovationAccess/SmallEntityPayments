@@ -2,9 +2,12 @@
 """Orchestrate the full invoice extraction pipeline for an entity.
 
 This is a Cloud Run Job entrypoint that manages the entire pipeline:
-  Phase 1: Download payment PDFs from USPTO to GCS (parallel threads)
-  Phase 2: Extract data from PDFs using pdfplumber (parallel threads)
-  Phase 3: Gemini fallback for extraction failures (rate-limited)
+  Phase 1: Download payment receipt PDFs from USPTO to GCS (parallel threads)
+  Phase 2: Extract fee line items from PDFs using Gemini Vision (rate-limited)
+
+Only downloads N417.PYMT (electronic payment receipts) and IFEE (issue fee)
+documents. Fee codes are self-describing: first digit encodes entity size
+(1=LARGE, 2=SMALL, 3=MICRO, 4=SMALL electronic).
 
 All state is tracked in BigQuery for resumability. If the job times out
 or fails, re-running it picks up where it left off.
@@ -13,9 +16,9 @@ Environment variables:
   ENTITY_NAME — entity to process (required)
   PARALLEL_DOWNLOADS — number of parallel download threads (default 5)
   MAX_APPS — limit for testing (default: all)
+  FILING_YEARS — number of years of filings to cover (default 10)
   GCP_PROJECT_ID — GCP project (default: uspto-data-app)
   BIGQUERY_DATASET — BQ dataset (default: uspto_data)
-  SKIP_GEMINI — set to "1" to skip Gemini fallback phase
 """
 
 from __future__ import annotations
@@ -36,7 +39,6 @@ from google.cloud import bigquery, storage
 from utils.invoice_extraction import (
     download_pdf_bytes,
     extract_with_gemini,
-    extract_with_pdfplumber,
     find_payment_docs,
     get_downloaded_apps,
     save_extraction,
@@ -56,7 +58,6 @@ logger = logging.getLogger(__name__)
 ENTITY_NAME = os.environ.get("ENTITY_NAME", "")
 PARALLEL_DOWNLOADS = int(os.environ.get("PARALLEL_DOWNLOADS", "5"))
 MAX_APPS = int(os.environ.get("MAX_APPS", "0"))  # 0 = unlimited
-SKIP_GEMINI = os.environ.get("SKIP_GEMINI", "0") == "1"
 GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "uspto-data-app")
 BQ_DATASET = os.environ.get("BIGQUERY_DATASET", "uspto_data")
 
@@ -125,6 +126,17 @@ def download_app_docs(
         docs = find_payment_docs(app_number)
         result["docs_found"] = len(docs)
 
+        if not docs:
+            # No payment receipts found — save a marker row so this app
+            # is marked as "checked" and won't be re-queried on resume.
+            save_extraction(
+                bq_client, app_number,
+                doc_meta={"doc_code": "NONE", "description": "No payment receipts found"},
+                extraction=None,
+                gcs_path="",
+                extraction_status="no_docs",
+            )
+
         for doc_meta in docs:
             try:
                 # Download PDF bytes
@@ -163,13 +175,10 @@ def extract_single_doc(
     gcs_client: storage.Client,
     row: dict,
 ) -> dict:
-    """Extract data from a single downloaded PDF.
+    """Extract fee data from a single downloaded PDF using Gemini Vision.
 
-    Strategy: Try pdfplumber first (free, fast) for PDFs with text layers.
-    Most USPTO payment PDFs are scanned images, so fall through to Gemini.
-    Gemini is the primary extraction method for these scanned docs.
-
-    Returns: {gcs_path, success, method}
+    USPTO payment PDFs are scanned TIFF images — Gemini Vision is the
+    sole extraction method. Returns: {gcs_path, success, method}
     """
     gcs_path = row["gcs_path"]
     app_number = row["application_number"]
@@ -180,15 +189,7 @@ def extract_single_doc(
         blob = bucket.blob(gcs_path)
         pdf_bytes = blob.download_as_bytes()
 
-        # Quick check: does PDF have a text layer? (most USPTO PDFs don't)
-        extraction = extract_with_pdfplumber(pdf_bytes)
-        if extraction:
-            _update_extraction_status(
-                bq_client, app_number, gcs_path, extraction, "extracted", row
-            )
-            return {"gcs_path": gcs_path, "success": True, "method": "pdfplumber"}
-
-        # Primary: Gemini Vision (handles scanned image PDFs)
+        # Extract with Gemini Vision
         extraction = extract_with_gemini(pdf_bytes)
         if extraction:
             _update_extraction_status(
@@ -196,42 +197,14 @@ def extract_single_doc(
             )
             return {"gcs_path": gcs_path, "success": True, "method": "gemini"}
 
-        # Both failed
+        # Gemini failed
         _update_extraction_status(
             bq_client, app_number, gcs_path, None, "failed", row
         )
-        return {"gcs_path": gcs_path, "success": False, "method": "none"}
+        return {"gcs_path": gcs_path, "success": False, "method": "failed"}
 
     except Exception as e:
         logger.warning("Extraction error for %s: %s", gcs_path, e)
-        return {"gcs_path": gcs_path, "success": False, "method": "error"}
-
-
-def gemini_extract_single(
-    bq_client: bigquery.Client,
-    gcs_client: storage.Client,
-    row: dict,
-) -> dict:
-    """Run Gemini Vision extraction on a single failed PDF."""
-    gcs_path = row["gcs_path"]
-    app_number = row["application_number"]
-
-    try:
-        bucket = gcs_client.bucket("uspto-bulk-staging")
-        blob = bucket.blob(gcs_path)
-        pdf_bytes = blob.download_as_bytes()
-
-        extraction = extract_with_gemini(pdf_bytes)
-        if extraction:
-            _update_extraction_status(
-                bq_client, app_number, gcs_path, extraction, "extracted"
-            )
-            return {"gcs_path": gcs_path, "success": True, "method": "gemini"}
-
-        return {"gcs_path": gcs_path, "success": False, "method": "gemini_failed"}
-
-    except Exception as e:
-        logger.warning("Gemini extraction error for %s: %s", gcs_path, e)
         return {"gcs_path": gcs_path, "success": False, "method": "error"}
 
 
@@ -434,9 +407,9 @@ def main():
 
         logger.info("Download phase complete: %d docs, %d errors", total_docs_downloaded, len(download_errors))
 
-    # ── Phase 2: EXTRACT (pdfplumber) ─────────────────────────────
+    # ── Phase 2: EXTRACT (Gemini Vision) ────────────────────────────
 
-    logger.info("Phase 2: Extracting data from downloaded PDFs...")
+    logger.info("Phase 2: Extracting fee data from downloaded PDFs via Gemini Vision...")
     update_pipeline_status(
         bq_client, ENTITY_NAME, "extracting",
         total_apps=len(all_apps),
@@ -459,38 +432,25 @@ def main():
     if unextracted:
         extracted_count = 0
         failed_count = 0
-        pdfplumber_count = 0
-        gemini_count = 0
 
-        # Gemini free tier: ~1,500 requests/day = ~1 per minute to be safe
-        # But Vertex AI allows bursts. Use 2-second delay between Gemini calls.
-        # pdfplumber (text-layer PDFs) has no rate limit.
+        # Gemini Flash-Lite via Vertex AI — paid usage, no hard daily cap.
+        # 2-second delay between calls to be conservative with rate limits.
         GEMINI_DELAY_SECONDS = 2
-        DAILY_GEMINI_LIMIT = 1400  # leave margin below 1,500
 
         for i, row in enumerate(unextracted):
-            if gemini_count >= DAILY_GEMINI_LIMIT:
-                logger.info("Reached daily Gemini limit (%d). Stopping extraction. "
-                           "Re-run job to continue.", DAILY_GEMINI_LIMIT)
-                break
-
             result = extract_single_doc(bq_client, gcs_client, row)
             if result["success"]:
                 extracted_count += 1
-                if result["method"] == "pdfplumber":
-                    pdfplumber_count += 1
-                elif result["method"] == "gemini":
-                    gemini_count += 1
-                    time.sleep(GEMINI_DELAY_SECONDS)  # rate limit Gemini calls
             else:
                 failed_count += 1
+
+            time.sleep(GEMINI_DELAY_SECONDS)  # rate limit Gemini calls
 
             total_done = extracted_count + failed_count
             if total_done % 50 == 0 or total_done == len(unextracted):
                 logger.info(
-                    "Extraction progress: %d/%d done (%d extracted [%d pdfplumber, %d gemini], %d failed)",
-                    total_done, len(unextracted), extracted_count, pdfplumber_count,
-                    gemini_count, failed_count,
+                    "Extraction progress: %d/%d done (%d extracted, %d failed)",
+                    total_done, len(unextracted), extracted_count, failed_count,
                 )
                 update_pipeline_status(
                     bq_client, ENTITY_NAME, "extracting",
@@ -500,8 +460,8 @@ def main():
                     failed_docs=failed_count,
                 )
 
-        logger.info("Extraction complete: %d extracted (%d pdfplumber, %d gemini), %d failed",
-                    extracted_count, pdfplumber_count, gemini_count, failed_count)
+        logger.info("Extraction complete: %d extracted, %d failed",
+                    extracted_count, failed_count)
 
     # ── Final summary ─────────────────────────────────────────────
 
@@ -512,6 +472,7 @@ def main():
       COUNTIF(extraction_status = 'extracted') as extracted,
       COUNTIF(extraction_status = 'failed') as failed,
       COUNTIF(extraction_status = 'downloaded') as still_downloaded,
+      COUNTIF(extraction_status = 'no_docs') as no_docs,
       ROUND(SUM(CASE WHEN extraction_status = 'extracted' THEN total_amount ELSE 0 END), 2) as total_dollars
     FROM `uspto-data-app.uspto_data.invoice_extractions`
     WHERE application_number IN UNNEST(@apps)
@@ -532,8 +493,8 @@ def main():
     logger.info("PIPELINE COMPLETE")
     logger.info("Entity: %s", ENTITY_NAME)
     logger.info("Applications: %d", len(all_apps))
-    logger.info("Documents: %d total, %d extracted, %d failed",
-                summary.total_docs, summary.extracted, summary.failed)
+    logger.info("Documents: %d total, %d extracted, %d failed, %d apps with no payment receipts",
+                summary.total_docs, summary.extracted, summary.failed, summary.no_docs)
     logger.info("Total dollars extracted: $%s", f"{summary.total_dollars:,.2f}" if summary.total_dollars else "0")
     logger.info("=" * 60)
 
