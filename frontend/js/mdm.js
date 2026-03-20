@@ -72,6 +72,7 @@ async function handleSearch() {
     workspaceData = await apiPost('/mdm/search', { query });
     selectedRows.clear();
     lastCheckboxIndex = null;
+    activeRepresentative = null;
     sortData();
     renderTable();
     workspace.classList.remove('hidden');
