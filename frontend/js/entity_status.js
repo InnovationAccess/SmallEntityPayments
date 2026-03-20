@@ -657,13 +657,36 @@ async function loadApplicantPortfolio() {
   const name = appInput.value.trim();
   if (!name) return;
 
+  // Clear any previous extraction progress polling
+  if (typeof _extractionPollTimer !== 'undefined' && _extractionPollTimer) {
+    clearInterval(_extractionPollTimer);
+    _extractionPollTimer = null;
+  }
+
   setLoading(appBtn, true);
   appArea.classList.remove('hidden');
-  appArea.innerHTML = '<p class="text-muted">Loading portfolio — searching all applicants, inventors, and assignees...</p>';
+  appArea.innerHTML = '<p class="text-muted">Checking MDM normalization...</p>';
 
   try {
+    // Step 1: Resolve through MDM — Entity Status only works with normalized names
+    const resolved = await apiGet(`/mdm/resolve?name=${encodeURIComponent(name)}`);
+    if (!resolved.is_unified) {
+      appArea.innerHTML = `
+        <div class="es-event-code-warning" style="display:block">
+          <strong>⚠ Name Not Normalized:</strong> "${escHtml(name)}" is not in the MDM system.
+          Please go to the <strong>MDM</strong> tab and associate this name with a representative
+          name before analyzing the portfolio.
+        </div>`;
+      return;
+    }
+
+    // Use the canonical representative name for all downstream calls
+    const representativeName = resolved.representative_name;
+    appArea.innerHTML = '<p class="text-muted">Loading portfolio — searching all applicants, inventors, and assignees...</p>';
+
+    // Step 2: Load portfolio using the representative name
     const data = await apiPost('/api/entity-status/by-applicant', {
-      applicant_name: name,
+      applicant_name: representativeName,
       limit: 50000,
     });
     renderApplicantPortfolio(data);
@@ -1040,6 +1063,29 @@ function renderApplicantPortfolio(data) {
       <div class="card">
         <h4 class="card-title" style="font-size:1rem">Prosecution Payment Analysis</h4>
         <p class="text-muted" style="margin:0 0 0.5rem">Identifies all fee payments made during prosecution and classifies them by the entity status at the time of payment</p>
+        <div id="es-event-code-warning" class="es-event-code-warning" style="display:none">
+          <strong>\u26A0 Temporary Data Source:</strong> These numbers are derived from prosecution event codes,
+          which capture only ~20% of actual fee payments. Invoice-based extraction is in progress \u2014
+          numbers will update automatically when complete.
+        </div>
+        <div id="es-extraction-progress-section" style="display:none;margin:0.5rem 0">
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.15rem">
+            <span style="font-size:0.8rem;font-weight:600;min-width:110px">PDF Retrieval:</span>
+            <span id="es-retrieval-pct" style="font-size:0.8rem;color:#6b7280">0%</span>
+          </div>
+          <div class="px-progress-bar">
+            <div class="px-progress-fill" id="es-retrieval-fill" style="width:0%"></div>
+          </div>
+          <div id="es-retrieval-detail" style="font-size:0.75rem;color:#6b7280;margin-top:0.1rem;margin-bottom:0.4rem"></div>
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.15rem">
+            <span style="font-size:0.8rem;font-weight:600;min-width:110px">Data Extraction:</span>
+            <span id="es-extract-pct" style="font-size:0.8rem;color:#6b7280">0%</span>
+          </div>
+          <div class="px-progress-bar">
+            <div class="px-progress-fill" id="es-extract-fill" style="width:0%"></div>
+          </div>
+          <div id="es-extract-detail" style="font-size:0.75rem;color:#6b7280;margin-top:0.1rem"></div>
+        </div>
         <div id="es-pros-pay-progress" style="margin-bottom:0.5rem;display:none">
           <span class="spinner" style="display:inline-block;width:14px;height:14px;border:2px solid #ccc;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:6px"></span>
           <span id="es-pros-pay-status" class="text-muted" style="font-size:0.85rem">Analyzing prosecution payments...</span>
@@ -1563,6 +1609,9 @@ async function fetchProsecutionPaymentsAuto(entityName, allApps) {
 
     // Fetch extraction data in parallel (non-blocking, enriches tooltips)
     fetchExtractionData(allApps);
+
+    // Fetch extraction progress (non-blocking, shows warning + gauges)
+    fetchExtractionProgress(entityName, allApps);
 
     // Populate KPIs
     const k = merged.kpis || {};
@@ -2330,6 +2379,102 @@ async function fetchExtractionData(allApps) {
   } catch (err) {
     // Non-critical — tooltips just won't show extraction data
     window._extractionData = {};
+  }
+}
+
+/**
+ * Fetch extraction pipeline progress and render warning banner + gauges.
+ * Polls every 30 seconds while extraction is in progress.
+ */
+let _extractionPollTimer = null;
+
+async function fetchExtractionProgress(entityName, allApps) {
+  if (!allApps || allApps.length === 0) return;
+
+  const warningEl = document.getElementById('es-event-code-warning');
+  const progressSection = document.getElementById('es-extraction-progress-section');
+  const retrievalPctEl = document.getElementById('es-retrieval-pct');
+  const retrievalFillEl = document.getElementById('es-retrieval-fill');
+  const retrievalDetailEl = document.getElementById('es-retrieval-detail');
+  const extractPctEl = document.getElementById('es-extract-pct');
+  const extractFillEl = document.getElementById('es-extract-fill');
+  const extractDetailEl = document.getElementById('es-extract-detail');
+
+  if (!warningEl || !progressSection) return;
+
+  try {
+    const resp = await apiPost('/api/entity-status/extraction-progress', {
+      representative_name: entityName,
+      application_numbers: allApps,
+    });
+
+    const phase = resp.phase || 'not_started';
+    const totalApps = resp.total_apps_in_portfolio || allApps.length;
+    const appsChecked = resp.apps_checked || 0;
+    const totalRetrieved = resp.total_docs_retrieved || 0;
+    const extracted = resp.extracted_docs || 0;
+    const pending = resp.pending_extraction || 0;
+    const failed = resp.failed_docs || 0;
+    const noDocs = resp.no_docs_apps || 0;
+    const retrievalPct = resp.retrieval_pct || 0;
+    const extractionPct = resp.extraction_pct || 0;
+
+    if (phase === 'complete' && extracted > 0) {
+      // Extraction complete — green success message
+      warningEl.className = 'es-event-code-warning ready';
+      warningEl.innerHTML = '<strong>\u2713 Invoice Data Available:</strong> ' +
+        extracted.toLocaleString() + ' payment invoices extracted across ' +
+        appsChecked.toLocaleString() + ' applications.' +
+        (noDocs > 0 ? ' ' + noDocs.toLocaleString() + ' apps had no payment receipts.' : '') +
+        (failed > 0 ? ' ' + failed.toLocaleString() + ' extractions failed.' : '');
+      warningEl.style.display = '';
+      progressSection.style.display = 'none';
+      if (_extractionPollTimer) { clearInterval(_extractionPollTimer); _extractionPollTimer = null; }
+
+    } else if (phase === 'not_started') {
+      // No extraction data — red warning, no gauges
+      warningEl.className = 'es-event-code-warning';
+      warningEl.style.display = '';
+      progressSection.style.display = 'none';
+      if (_extractionPollTimer) { clearInterval(_extractionPollTimer); _extractionPollTimer = null; }
+
+    } else {
+      // In progress — red warning + both gauges
+      warningEl.className = 'es-event-code-warning';
+      warningEl.style.display = '';
+      progressSection.style.display = '';
+
+      // Gauge 1: PDF Retrieval
+      retrievalPctEl.textContent = Math.round(retrievalPct) + '%';
+      retrievalFillEl.style.width = Math.round(retrievalPct) + '%';
+      const retParts = [
+        appsChecked.toLocaleString() + ' of ' + totalApps.toLocaleString() + ' apps checked',
+        totalRetrieved.toLocaleString() + ' invoices found',
+      ];
+      if (noDocs > 0) retParts.push(noDocs.toLocaleString() + ' apps with no payment receipts');
+      retrievalDetailEl.textContent = retParts.join(' \u00B7 ');
+
+      // Gauge 2: Data Extraction
+      if (totalRetrieved > 0) {
+        extractPctEl.textContent = Math.round(extractionPct) + '%';
+        extractFillEl.style.width = Math.round(extractionPct) + '%';
+        const extParts = [
+          extracted.toLocaleString() + ' of ' + totalRetrieved.toLocaleString() + ' invoices extracted',
+        ];
+        if (failed > 0) extParts.push(failed.toLocaleString() + ' failed');
+        extractDetailEl.textContent = extParts.join(' \u00B7 ');
+      }
+
+      // Start polling if not already
+      if (!_extractionPollTimer) {
+        _extractionPollTimer = setInterval(() => fetchExtractionProgress(entityName, allApps), 30000);
+      }
+    }
+  } catch (err) {
+    // Non-critical — show red warning without gauges
+    warningEl.className = 'es-event-code-warning';
+    warningEl.style.display = '';
+    progressSection.style.display = 'none';
   }
 }
 

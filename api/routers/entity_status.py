@@ -79,6 +79,11 @@ class ExtractionDataRequest(BaseModel):
     application_numbers: List[str]
 
 
+class ExtractionProgressRequest(BaseModel):
+    representative_name: str
+    application_numbers: List[str]
+
+
 # ── Prosecution Payment Analysis Constants ────────────────────────
 
 # Status-change event codes → new entity status
@@ -1889,6 +1894,100 @@ def get_extraction_data(req: ExtractionDataRequest) -> Dict[str, Any]:
             "apps_with_extractions": apps_with,
             "total_extractions": total_docs,
         },
+    }
+
+
+# ── Extraction Progress (keyed by representative name) ───────────
+
+@router.post("/extraction-progress")
+def get_extraction_progress(req: ExtractionProgressRequest) -> Dict[str, Any]:
+    """Return extraction pipeline progress for a representative name's portfolio.
+
+    Queries invoice_extractions by application_numbers (pre-computed by the
+    frontend from the MDM-resolved portfolio).  Returns counts for each
+    extraction_status so the frontend can render two progress gauges:
+      Gauge 1 — PDF Retrieval:  apps_checked / total_apps_in_portfolio
+      Gauge 2 — Data Extraction: extracted_docs / total_docs_retrieved
+    """
+    if not req.application_numbers:
+        return {
+            "representative_name": req.representative_name,
+            "total_apps_in_portfolio": 0,
+            "apps_checked": 0,
+            "total_docs_retrieved": 0,
+            "extracted_docs": 0,
+            "pending_extraction": 0,
+            "failed_docs": 0,
+            "no_docs_apps": 0,
+            "retrieval_pct": 0,
+            "extraction_pct": 0,
+            "phase": "not_started",
+        }
+
+    client = bigquery.Client(location="us-west1")
+
+    query = """
+    SELECT
+      COUNT(DISTINCT application_number) as apps_with_records,
+      COUNTIF(extraction_status = 'extracted') as extracted_docs,
+      COUNTIF(extraction_status = 'downloaded') as pending_docs,
+      COUNTIF(extraction_status = 'failed') as failed_docs,
+      COUNTIF(extraction_status = 'no_docs') as no_docs_apps
+    FROM `uspto-data-app.uspto_data.invoice_extractions`
+    WHERE application_number IN UNNEST(@apps)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("apps", "STRING", req.application_numbers)
+        ]
+    )
+    rows = list(client.query(query, job_config=job_config).result())
+
+    if not rows or rows[0].apps_with_records == 0:
+        return {
+            "representative_name": req.representative_name,
+            "total_apps_in_portfolio": len(req.application_numbers),
+            "apps_checked": 0,
+            "total_docs_retrieved": 0,
+            "extracted_docs": 0,
+            "pending_extraction": 0,
+            "failed_docs": 0,
+            "no_docs_apps": 0,
+            "retrieval_pct": 0,
+            "extraction_pct": 0,
+            "phase": "not_started",
+        }
+
+    r = rows[0]
+    total_apps = len(req.application_numbers)
+    apps_checked = r.apps_with_records or 0
+    extracted = r.extracted_docs or 0
+    pending = r.pending_docs or 0
+    failed = r.failed_docs or 0
+    no_docs = r.no_docs_apps or 0
+    total_retrieved = extracted + pending + failed
+
+    retrieval_pct = round(apps_checked / total_apps * 100, 1) if total_apps > 0 else 0
+    extraction_pct = round(extracted / total_retrieved * 100, 1) if total_retrieved > 0 else 0
+
+    # Phase logic
+    if pending > 0:
+        phase = "in_progress"
+    else:
+        phase = "complete"
+
+    return {
+        "representative_name": req.representative_name,
+        "total_apps_in_portfolio": total_apps,
+        "apps_checked": apps_checked,
+        "total_docs_retrieved": total_retrieved,
+        "extracted_docs": extracted,
+        "pending_extraction": pending,
+        "failed_docs": failed,
+        "no_docs_apps": no_docs,
+        "retrieval_pct": retrieval_pct,
+        "extraction_pct": extraction_pct,
+        "phase": phase,
     }
 
 
