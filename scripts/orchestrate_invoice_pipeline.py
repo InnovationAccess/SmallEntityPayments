@@ -62,24 +62,69 @@ GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "uspto-data-app")
 BQ_DATASET = os.environ.get("BIGQUERY_DATASET", "uspto_data")
 
 
+def _expand_name_via_mdm(bq_client: bigquery.Client, name: str) -> list[str]:
+    """Resolve a name through the MDM name_unification table.
+
+    Returns all associated_names for the representative name group.
+    If the name is not in the MDM system, returns just the original name.
+    This is the same logic as bq_service.expand_name_for_query().
+    """
+    sql = f"""
+    WITH rep AS (
+      SELECT representative_name
+      FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.name_unification`
+      WHERE LOWER(associated_name) = LOWER(@name)
+      LIMIT 1
+    )
+    SELECT DISTINCT associated_name
+    FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.name_unification`
+    WHERE representative_name = (SELECT representative_name FROM rep)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", name)]
+    )
+    rows = list(bq_client.query(sql, job_config=job_config).result())
+    if rows:
+        names = [r.associated_name for r in rows]
+        logger.info("MDM resolved '%s' → %d associated names", name, len(names))
+        return names
+    logger.warning("'%s' not found in MDM name_unification — using as-is", name)
+    return [name]
+
+
 def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
-    """Get all application numbers for an entity (same portfolio query as entity_status.py)."""
+    """Get all application numbers for an entity via MDM name resolution.
+
+    Resolves ENTITY_NAME through the name_unification table to get all
+    associated names, then searches pfw_applicants, pfw_inventors, and
+    pat_assign_assignees using exact IN matching (not LIKE).
+    Same portfolio logic as entity_status.py.
+    """
+    # Step 1: Resolve through MDM
+    expanded = _expand_name_via_mdm(bq_client, ENTITY_NAME)
+
+    # Build parameterized IN clause for all expanded names
+    name_params = []
+    for i, n in enumerate(expanded):
+        name_params.append(bigquery.ScalarQueryParameter(f"name_{i}", "STRING", n))
+    name_in = ", ".join(f"@name_{i}" for i in range(len(expanded)))
+
     # Default: last 10 years of filings. Set FILING_YEARS env var to override.
     filing_years = int(os.environ.get("FILING_YEARS", "10"))
 
     query = f"""
     WITH portfolio AS (
-        -- Source 1: pfw_applicants
+        -- Source 1: pfw_applicants (exact name match via MDM)
         SELECT DISTINCT application_number
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_applicants`
-        WHERE UPPER(applicant_name) LIKE CONCAT('%', UPPER(@entity), '%')
+        WHERE applicant_name IN ({name_in})
 
         UNION DISTINCT
 
         -- Source 2: pfw_inventors (for individual inventors)
         SELECT DISTINCT application_number
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pfw_inventors`
-        WHERE UPPER(CONCAT(last_name, ', ', first_name)) LIKE CONCAT('%', UPPER(@entity), '%')
+        WHERE inventor_name IN ({name_in})
 
         UNION DISTINCT
 
@@ -88,7 +133,7 @@ def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
         FROM `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_assignees` a
         JOIN `{GCP_PROJECT_ID}.{BQ_DATASET}.pat_assign_documents` d
           ON a.reel_frame = d.reel_frame
-        WHERE UPPER(a.assignee_name) LIKE CONCAT('%', UPPER(@entity), '%')
+        WHERE a.assignee_name IN ({name_in})
     )
     SELECT p.application_number, pfw.filing_date
     FROM portfolio p
@@ -101,11 +146,7 @@ def get_entity_app_numbers(bq_client: bigquery.Client) -> list[str]:
     ORDER BY pfw.filing_date DESC
     """
 
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("entity", "STRING", ENTITY_NAME)
-        ]
-    )
+    job_config = bigquery.QueryJobConfig(query_parameters=name_params)
     rows = list(bq_client.query(query, job_config=job_config).result())
     return [r.application_number for r in rows]
 

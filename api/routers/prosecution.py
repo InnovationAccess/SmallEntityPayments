@@ -1741,8 +1741,15 @@ def get_pipeline_status(
     rows = list(client.query(query, job_config=job_config).result())
 
     if not rows:
-        # Check if there are any extractions for this entity at all
-        count_query = """
+        # Check if there are any extractions for this entity at all.
+        # Resolve through MDM to get all associated names (exact match, not LIKE).
+        expanded = bq_service.expand_name_for_query(entity_name)
+        name_params = []
+        for i, n in enumerate(expanded):
+            name_params.append(bigquery.ScalarQueryParameter(f"name_{i}", "STRING", n))
+        name_in = ", ".join(f"@name_{i}" for i in range(len(expanded)))
+
+        count_query = f"""
         SELECT COUNT(DISTINCT application_number) as extracted_apps,
                COUNT(*) as total_docs,
                COUNTIF(extraction_status = 'extracted') as extracted_docs
@@ -1750,10 +1757,11 @@ def get_pipeline_status(
         WHERE application_number IN (
             SELECT DISTINCT application_number
             FROM `uspto-data-app.uspto_data.pfw_applicants`
-            WHERE UPPER(applicant_name) LIKE CONCAT('%', UPPER(@entity), '%')
+            WHERE applicant_name IN ({name_in})
         )
         """
-        count_rows = list(client.query(count_query, job_config=job_config).result())
+        count_config = bigquery.QueryJobConfig(query_parameters=name_params)
+        count_rows = list(client.query(count_query, job_config=count_config).result())
         if count_rows and count_rows[0].extracted_apps > 0:
             r = count_rows[0]
             return {
