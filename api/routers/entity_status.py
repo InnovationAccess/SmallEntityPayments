@@ -2293,6 +2293,30 @@ def queue_extraction(req: QueueExtractionRequest) -> Dict[str, Any]:
         }
 
 
+@router.get("/queue-stats")
+def get_queue_stats() -> Dict[str, Any]:
+    """Return global extraction queue and processing stats."""
+    client = bigquery.Client(location="us-west1")
+    query = """
+    SELECT
+      (SELECT COUNT(DISTINCT application_number)
+       FROM `uspto-data-app.uspto_data.invoice_extraction_queue`) as queue_count,
+      (SELECT COUNT(*)
+       FROM `uspto-data-app.uspto_data.invoice_extractions`
+       WHERE extraction_status = 'downloaded') as pending_ocr,
+      (SELECT COUNT(*)
+       FROM `uspto-data-app.uspto_data.invoice_extractions`
+       WHERE extraction_status = 'extracted') as extracted
+    """
+    rows = list(client.query(query).result())
+    r = rows[0] if rows else None
+    return {
+        "queue_count": r.queue_count if r else 0,
+        "pending_ocr": r.pending_ocr if r else 0,
+        "extracted": r.extracted if r else 0,
+    }
+
+
 # ── Helpers ───────────────────────────────────────────────────────
 
 def _fmt_date(val) -> str | None:

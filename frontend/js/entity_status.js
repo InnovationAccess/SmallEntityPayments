@@ -38,6 +38,22 @@ const convArea        = document.getElementById('es-conv-results');
 const appArea         = document.getElementById('es-app-results');
 const statusMsg       = document.getElementById('es-status');
 
+// ── Queue Stats (load on tab init) ──────────────────────────────
+(async function loadQueueStats() {
+  const el = document.getElementById('es-queue-stats');
+  if (!el) return;
+  try {
+    const s = await apiGet('/api/entity-status/queue-stats');
+    const parts = [];
+    if (s.queue_count) parts.push(`<span class="qs-num">${s.queue_count.toLocaleString()}</span> apps in queue`);
+    if (s.pending_ocr) parts.push(`<span class="qs-num">${s.pending_ocr.toLocaleString()}</span> PDFs awaiting extraction`);
+    if (s.extracted)   parts.push(`<span class="qs-num qs-done">${s.extracted.toLocaleString()}</span> PDFs extracted`);
+    el.innerHTML = parts.join(' &middot; ');
+  } catch (e) {
+    el.textContent = '';
+  }
+})();
+
 // ── Portfolio State (pagination, sorting, filtering) ─────────────
 const PAGE_SIZE = 50;
 let _portfolioState = {

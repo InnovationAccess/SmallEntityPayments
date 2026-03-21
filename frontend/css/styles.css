@@ -1830,6 +1830,21 @@ textarea { resize: vertical; }
 .es-microchart-tooltip .es-status-micro { background: #1e40af; color: #bfdbfe; }
 .es-microchart-tooltip .es-status-large { background: #991b1b; color: #fecaca; }
 
+/* Queue stats display */
+.es-queue-stats {
+  float: right;
+  font-size: 0.8rem;
+  color: #6b7280;
+  line-height: 1.6;
+}
+.es-queue-stats .qs-num {
+  font-weight: 700;
+  color: #dc2626;
+}
+.es-queue-stats .qs-num.qs-done {
+  color: #16a34a;
+}
+
 /* Data source badges (Event Code / Invoice) */
 .es-data-source-badge {
   display: inline-block;
