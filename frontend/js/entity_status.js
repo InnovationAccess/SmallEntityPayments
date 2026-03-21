@@ -38,8 +38,8 @@ const convArea        = document.getElementById('es-conv-results');
 const appArea         = document.getElementById('es-app-results');
 const statusMsg       = document.getElementById('es-status');
 
-// ── Queue Stats (load on tab init) ──────────────────────────────
-(async function loadQueueStats() {
+// ── Queue Stats (load on tab init, poll every 60s) ──────────────
+async function refreshQueueStats() {
   const el = document.getElementById('es-queue-stats');
   if (!el) return;
   try {
@@ -52,7 +52,9 @@ const statusMsg       = document.getElementById('es-status');
   } catch (e) {
     el.textContent = '';
   }
-})();
+}
+refreshQueueStats();
+setInterval(refreshQueueStats, 60000);
 
 // ── Portfolio State (pagination, sorting, filtering) ─────────────
 const PAGE_SIZE = 50;
@@ -1108,76 +1110,76 @@ function renderApplicantPortfolio(data) {
         </div>
         <div id="es-pros-pay-kpis" style="display:none">
           <div class="cite-summary-grid">
-            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution: Small Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution: Small Rate Payments" title="Count of prosecution fee payments where the entity paid at the small-entity rate. Derived from event codes in pfw_transactions: fee codes starting with 2 or 4 = small entity. Each unique (app + fee category + date) combination counts as one payment. Only events during ownership window are counted.">
               <span class="cite-stat-value" id="es-pros-pay-small">0</span>
               <span class="cite-stat-label">${statusBadge('SMALL')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution: Micro Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution: Micro Rate Payments" title="Count of prosecution fee payments where the entity paid at the micro-entity rate. Derived from event codes in pfw_transactions: fee codes starting with 3 = micro entity. Micro entity status only exists after AIA (March 19, 2013). Each unique (app + fee category + date) = one payment. Only events during ownership window.">
               <span class="cite-stat-value" id="es-pros-pay-micro">0</span>
               <span class="cite-stat-label">${statusBadge('MICRO')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution: Large Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution: Large Rate Payments" title="Count of prosecution fee payments where the entity paid at the large-entity (undiscounted) rate. Derived from event codes in pfw_transactions: fee codes starting with 1 = large entity. Each unique (app + fee category + date) = one payment. Only events during ownership window.">
               <span class="cite-stat-value" id="es-pros-pay-large">0</span>
               <span class="cite-stat-label">${statusBadge('LARGE')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution: All Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution: All Payments" title="Total prosecution fee payment events across all entity sizes (small + micro + large). Covers 12 fee categories: filing, search, examination, issue, RCE (1st and 2nd+), extension (1-5 months), excess claims, appeal, IDS. Same-category dedup applied: same fee category + same app + same date = 1 payment.">
               <span class="cite-stat-value" id="es-pros-pay-total">0</span>
               <span class="cite-stat-label">Total</span>
             </div>
-            <div class="cite-stat">
+            <div class="cite-stat" title="Number of distinct applications that have at least one small-rate or micro-rate prosecution payment. An application with findings means the entity chose a discounted rate for at least one fee during prosecution of that application.">
               <span class="cite-stat-value" id="es-pros-pay-apps">0</span>
               <span class="cite-stat-label">Apps w/ Findings</span>
             </div>
           </div>
           <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
           <div class="cite-summary-grid">
-            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution 10y: Small Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL" data-label="Prosecution 10y: Small Rate Payments" title="Same as Small Rate above, but only counting payments made within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-small-10y">0</span>
               <span class="cite-stat-label">${statusBadge('SMALL')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution 10y: Micro Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:MICRO" data-label="Prosecution 10y: Micro Rate Payments" title="Same as Micro Rate above, but only counting payments made within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-micro-10y">0</span>
               <span class="cite-stat-label">${statusBadge('MICRO')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution 10y: Large Rate Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:LARGE" data-label="Prosecution 10y: Large Rate Payments" title="Same as Large Rate above, but only counting payments made within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-large-10y">0</span>
               <span class="cite-stat-label">${statusBadge('LARGE')} Rate</span>
             </div>
-            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution 10y: All Payments">
+            <div class="cite-stat kpi-clickable" data-filter="prospay:SMALL,MICRO,LARGE" data-label="Prosecution 10y: All Payments" title="Same as Total above, but only counting payments made within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-total-10y">0</span>
               <span class="cite-stat-label">Total</span>
             </div>
-            <div class="cite-stat">
+            <div class="cite-stat" title="Same as Apps w/ Findings above, but only counting applications with findings in the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-apps-10y">0</span>
               <span class="cite-stat-label">Apps w/ Findings</span>
             </div>
           </div>
           <p class="text-muted" style="margin:0.75rem 0 0.25rem;font-size:0.8rem;font-weight:600">Dollar Impact — Reduced-Rate Payments (Small + Micro) <span id="es-dollar-source-badge" class="es-data-source-badge event-code">Event Code Data</span></p>
           <div class="cite-summary-grid">
-            <div class="cite-stat">
+            <div class="cite-stat" title="Total dollars actually paid for prosecution fees where the entity used a small or micro rate. Source depends on badge: Event Code Data = calculated from fee schedule lookup (fee category × fee period × entity size), using utils/fee_schedule.py rates. Invoice Data = actual dollar amounts extracted from USPTO payment receipt PDFs via Gemini Vision OCR.">
               <span class="cite-stat-value" id="es-pros-pay-dollars-paid">$0</span>
               <span class="cite-stat-label">Amount Paid</span>
             </div>
-            <div class="cite-stat">
+            <div class="cite-stat" title="What the entity would have paid at the large-entity (undiscounted) rate for the same fees. Calculation: for Event Code Data, each fee is looked up in the fee schedule at the large-entity rate for that period. For Invoice Data, the paid amount is multiplied by a ratio: Pre-AIA small ×2.0 | AIA small ×2.0, micro ×4.0 | Post-UAIA (Dec 29, 2022+) small ×2.5, micro ×5.0.">
               <span class="cite-stat-value" id="es-pros-pay-dollars-large">$0</span>
               <span class="cite-stat-label">Large Rate</span>
             </div>
-            <div class="cite-stat" style="background:#fef2f2">
+            <div class="cite-stat" style="background:#fef2f2" title="Underpayment = Large Rate minus Amount Paid. This is the dollar difference between what the entity actually paid (at reduced small/micro rates) and what they would have paid at the full large-entity rate. Represents the total discount the entity received by claiming small or micro status.">
               <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta">$0</span>
               <span class="cite-stat-label">Underpayment</span>
             </div>
           </div>
           <p class="text-muted" style="margin:0.5rem 0 0.25rem;font-size:0.8rem">Past 10 years only</p>
           <div class="cite-summary-grid">
-            <div class="cite-stat">
+            <div class="cite-stat" title="Same as Amount Paid above, but only counting fees paid within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-dollars-paid-10y">$0</span>
               <span class="cite-stat-label">Amount Paid</span>
             </div>
-            <div class="cite-stat">
+            <div class="cite-stat" title="Same as Large Rate above, but only counting fees paid within the last 10 years.">
               <span class="cite-stat-value" id="es-pros-pay-dollars-large-10y">$0</span>
               <span class="cite-stat-label">Large Rate</span>
             </div>
-            <div class="cite-stat" style="background:#fef2f2">
+            <div class="cite-stat" style="background:#fef2f2" title="Same as Underpayment above, but only counting fees paid within the last 10 years.">
               <span class="cite-stat-value" style="color:#dc2626" id="es-pros-pay-dollars-delta-10y">$0</span>
               <span class="cite-stat-label">Underpayment</span>
             </div>
@@ -1193,7 +1195,7 @@ function renderApplicantPortfolio(data) {
     <!-- Prosecution Phase -->
     <div class="card" style="margin-top:1rem">
       <h4 class="card-title" style="font-size:1rem">Prosecution Phase — Entity Declarations</h4>
-      <p class="text-muted" style="margin:0 0 0.5rem">From prosecution transaction codes (SMAL, BIG., MICR)</p>
+      <p class="text-muted" style="margin:0 0 0.5rem" title="Count of entity status declarations found in pfw_transactions. SMAL = small entity status established, BIG. = large entity status established, MICR = micro entity status established. These are declaration events, not fee payments. Only events during the entity's ownership window are counted.">From prosecution transaction codes (SMAL, BIG., MICR)</p>
       <div class="cite-summary-grid">
         <div class="cite-stat">
           <span class="cite-stat-value">${kpi(pros.small, 'pros:SMALL', 'Prosecution: Small')}</span>
@@ -1236,7 +1238,7 @@ function renderApplicantPortfolio(data) {
     <!-- Post-Grant Phase -->
     <div class="card" style="margin-top:1rem">
       <h4 class="card-title" style="font-size:1rem">Post-Grant Phase — Maintenance Fees</h4>
-      <p class="text-muted" style="margin:0 0 0.5rem">From maintenance fee payments, declarations, and transitions</p>
+      <p class="text-muted" style="margin:0 0 0.5rem" title="Derived from maintenance_fee_events_v2 table. Entity status is determined by the event code prefix: M1xxx/F17xx = LARGE, M2xxx/F27xx = SMALL, M3xxx = MICRO. Only events that occurred during the entity's ownership window are counted.">From maintenance fee payments, declarations, and transitions</p>
       <div style="display:flex;gap:2rem;flex-wrap:wrap">
         <!-- Payments -->
         <div style="flex:1;min-width:340px">
